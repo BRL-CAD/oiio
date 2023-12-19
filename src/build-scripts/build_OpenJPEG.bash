@@ -4,7 +4,7 @@
 #
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Exit the whole script if any command fails.
 set -ex
@@ -36,15 +36,13 @@ cd ${OPENJPEG_SRC_DIR}
 echo "git checkout ${OPENJPEG_VERSION} --force"
 git checkout ${OPENJPEG_VERSION} --force
 
-mkdir -p ${OPENJPEG_BUILD_DIR} && true
-cd ${OPENJPEG_BUILD_DIR}
-
 if [[ -z $DEP_DOWNLOAD_ONLY ]]; then
-    time cmake -DCMAKE_BUILD_TYPE=Release \
+    time cmake -S . -B ${OPENJPEG_BUILD_DIR} \
+               -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX=${OPENJPEG_INSTALL_DIR} \
                -DBUILD_CODEC=OFF \
-               ${OPENJPEG_CONFIG_OPTS} ..
-    time cmake --build . --config Release --target install
+               ${OPENJPEG_CONFIG_OPTS}
+    time cmake --build ${OPENJPEG_BUILD_DIR} --config Release --target install
 fi
 
 # ls -R ${OPENJPEG_INSTALL_DIR}

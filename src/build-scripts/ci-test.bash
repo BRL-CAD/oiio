@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Important: set -ex causes this whole script to terminate with error if
 # any command in it fails. This is crucial for CI tests.
@@ -24,6 +24,8 @@ echo ; echo "Results of oiiotool brief help:"
 $OpenImageIO_ROOT/bin/oiiotool || true
 echo ; echo "Results of oiiotool full --help:"
 $OpenImageIO_ROOT/bin/oiiotool --help || true
+echo ; echo "Results of oiiotool --colorconfiginfo:"
+$OpenImageIO_ROOT/bin/oiiotool --colorconfiginfo
 echo ; echo "Results of oiiotool with no args (should get short help message):"
 $OpenImageIO_ROOT/bin/oiiotool || true
 echo ; echo "Run unit tests and simple stats:"

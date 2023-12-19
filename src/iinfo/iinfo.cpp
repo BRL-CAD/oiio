@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cmath>
@@ -487,5 +487,6 @@ main(int argc, const char* argv[])
     if (sum)
         print("Total size: {}\n", Strutil::memformat(totalsize));
 
+    shutdown();
     return returncode;
 }

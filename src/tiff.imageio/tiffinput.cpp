@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <algorithm>
@@ -25,9 +25,6 @@
 #include "imageio_pvt.h"
 
 
-OIIO_PLUGIN_NAMESPACE_BEGIN
-
-
 // General TIFF information:
 // TIFF 6.0 spec:
 //     http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
@@ -39,6 +36,35 @@ OIIO_PLUGIN_NAMESPACE_BEGIN
 // Libtiff:
 //     http://remotesensing.org/libtiff/
 
+
+// clang-format off
+#ifdef TIFFLIB_MAJOR_VERSION
+// libtiff >= 4.5 defines versions by number -- use them.
+#    define OIIO_TIFFLIB_VERSION (TIFFLIB_MAJOR_VERSION * 10000 \
+                                  + TIFFLIB_MINOR_VERSION * 100 \
+                                  + TIFFLIB_MICRO_VERSION)
+// For older libtiff, we need to figure it out by date.
+#elif TIFFLIB_VERSION >= 20220520
+#    define OIIO_TIFFLIB_VERSION 40400
+#elif TIFFLIB_VERSION >= 20210416
+#    define OIIO_TIFFLIB_VERSION 40300
+#elif TIFFLIB_VERSION >= 20201219
+#    define OIIO_TIFFLIB_VERSION 40200
+#elif TIFFLIB_VERSION >= 20191103
+#    define OIIO_TIFFLIB_VERSION 40100
+#elif TIFFLIB_VERSION >= 20120922
+#    define OIIO_TIFFLIB_VERSION 40003
+#elif TIFFLIB_VERSION >= 20111221
+#    define OIIO_TIFFLIB_VERSION 40000
+#elif TIFFLIB_VERSION >= 20090820
+#    define OIIO_TIFFLIB_VERSION 30900
+#else
+#    error "libtiff 3.9.0 or later is required"
+#endif
+// clang-format on
+
+
+OIIO_PLUGIN_NAMESPACE_BEGIN
 
 
 // Helper struct for constructing tables of TIFF tags
@@ -74,7 +100,7 @@ public:
     TIFFInput();
     ~TIFFInput() override;
     const char* format_name(void) const override { return "tiff"; }
-    bool valid_file(const std::string& filename) const override;
+    bool valid_file(Filesystem::IOProxy* ioproxy) const override;
     int supports(string_view feature) const override
     {
         return (feature == "exif" || feature == "iptc" || feature == "ioproxy");
@@ -206,18 +232,10 @@ private:
 
     void invert_photometric(int n, void* data);
 
-#ifdef TIFF_VERSION_BIG
     const TIFFField* find_field(int tifftag, TIFFDataType tifftype = TIFF_ANY)
     {
         return TIFFFindField(m_tif, tifftag, tifftype);
     }
-#else
-    const TIFFFieldInfo* find_field(int tifftag,
-                                    TIFFDataType tifftype = TIFF_ANY)
-    {
-        return TIFFFindFieldInfo(m_tif, tifftag, tifftype);
-    }
-#endif
 
     OIIO_NODISCARD
     TypeDesc tiffgetfieldtype(int tag)
@@ -443,7 +461,38 @@ private:
         return xtile + ytile * nxtiles + ztile * nxtiles * nytiles;
     }
 
-    bool valid_file(const std::string& filename, Filesystem::IOProxy* io) const;
+#if OIIO_TIFFLIB_VERSION >= 40500
+    std::string m_last_error;
+    spin_mutex m_last_error_mutex;
+
+    std::string oiio_tiff_last_error()
+    {
+        spin_lock lock(m_last_error_mutex);
+        return m_last_error;
+    }
+
+    // TIFF 4.5+ has a mechanism for per-file thread-safe error handlers.
+    // Use it.
+    static int my_error_handler(TIFF* tif, void* user_data,
+                                const char* /*module*/, const char* fmt,
+                                va_list ap)
+    {
+        TIFFInput* self = (TIFFInput*)user_data;
+        spin_lock lock(self->m_last_error_mutex);
+        self->m_last_error = Strutil::vsprintf(fmt, ap);
+        return 1;
+    }
+
+    static int my_warning_handler(TIFF* tif, void* user_data,
+                                  const char* /*module*/, const char* fmt,
+                                  va_list ap)
+    {
+        TIFFInput* self = (TIFFInput*)user_data;
+        spin_lock lock(self->m_last_error_mutex);
+        self->m_last_error = Strutil::vsprintf(fmt, ap);
+        return 1;
+    }
+#endif
 };
 
 
@@ -465,10 +514,10 @@ OIIO_EXPORT const char* tiff_input_extensions[]
 OIIO_PLUGIN_EXPORTS_END
 
 
-
-// Someplace to store an error message from the TIFF error handler
-// To avoid thread oddities, we have the storage area buffering error
-// messages be thread-specific.
+#if OIIO_TIFFLIB_VERSION < 40500
+// For TIFF 4.4 and earlier, we need someplace to store an error message from
+// the global TIFF error handler. To avoid thread oddities, we have the
+// storage area buffering error messages be thread-specific.
 static thread_local std::string thread_error_msg;
 static atomic_int handler_set;
 static spin_mutex handler_mutex;
@@ -503,7 +552,7 @@ oiio_tiff_set_error_handler()
         }
     }
 }
-
+#endif
 
 
 static tsize_t
@@ -595,7 +644,7 @@ static std::pair<int, const char*>  tiff_input_compressions[] = {
     { COMPRESSION_SGILOG,        "sgilog" },      // SGI log luminance RLE
     { COMPRESSION_SGILOG24,      "sgilog24" },    // SGI log 24bit
     { COMPRESSION_JP2000,        "jp2000" },      // Leadtools JPEG2000
-#if defined(TIFF_VERSION_BIG) && TIFFLIB_VERSION >= 20120922
+#if defined(TIFF_VERSION_BIG) && OIIO_TIFFLIB_VERSION >= 40003
     // Others supported in more recent TIFF library versions.
     { COMPRESSION_T85,           "T85" },         // TIFF/FX T.85 JBIG
     { COMPRESSION_T43,           "T43" },         // TIFF/FX T.43 color layered JBIG
@@ -618,7 +667,9 @@ tiff_compression_name(int code)
 
 TIFFInput::TIFFInput()
 {
+#if OIIO_TIFFLIB_VERSION < 40500
     oiio_tiff_set_error_handler();
+#endif
     init();
 }
 
@@ -633,19 +684,14 @@ TIFFInput::~TIFFInput()
 
 
 bool
-TIFFInput::valid_file(const std::string& filename,
-                      Filesystem::IOProxy* io) const
+TIFFInput::valid_file(Filesystem::IOProxy* ioproxy) const
 {
-    std::unique_ptr<Filesystem::IOProxy> local_io;
-    if (!io) {
-        io = new Filesystem::IOFile(filename, Filesystem::IOProxy::Read);
-        local_io.reset(io);
-    }
-    if (!io || !io->opened())
-        return false;  // needs to be able to open
-    uint16_t magic[2] = { 0, 0 };
-    size_t numRead    = io->pread(magic, 2 * sizeof(uint16_t), 0);
-    if (numRead != 2 * sizeof(uint16_t))  // read failed
+    if (!ioproxy || ioproxy->mode() != Filesystem::IOProxy::Mode::Read)
+        return false;
+
+    uint16_t magic[2] {};
+    const size_t numRead = ioproxy->pread(magic, sizeof(magic), 0);
+    if (numRead != sizeof(magic))  // read failed
         return false;
     if (magic[0] != TIFF_LITTLEENDIAN && magic[0] != TIFF_BIGENDIAN)
         return false;  // not the right byte order
@@ -659,17 +705,8 @@ TIFFInput::valid_file(const std::string& filename,
 
 
 bool
-TIFFInput::valid_file(const std::string& filename) const
-{
-    return valid_file(filename, nullptr);
-}
-
-
-
-bool
 TIFFInput::open(const std::string& name, ImageSpec& newspec)
 {
-    oiio_tiff_set_error_handler();
     m_filename = name;
     m_subimage = -1;
 
@@ -727,27 +764,54 @@ TIFFInput::seek_subimage(int subimage, int miplevel)
     bool read_meta = !(m_emulate_mipmap && m_tif && m_subimage >= 0);
 
     if (!m_tif) {
+#if OIIO_TIFFLIB_VERSION >= 40500
+        auto openopts = TIFFOpenOptionsAlloc();
+        TIFFOpenOptionsSetErrorHandlerExtR(openopts, my_error_handler, this);
+        TIFFOpenOptionsSetWarningHandlerExtR(openopts, my_warning_handler,
+                                             this);
+#endif
         if (ioproxy_opened()) {
             static_assert(sizeof(thandle_t) == sizeof(void*),
                           "thandle_t must be same size as void*");
             // Strutil::print("\n\nOpening client \"{}\"\n", m_filename);
             ioseek(0);
+#if OIIO_TIFFLIB_VERSION >= 40500
             m_tif = TIFFClientOpen(m_filename.c_str(), "rm", ioproxy(),
                                    reader_readproc, reader_writeproc,
                                    reader_seekproc, reader_closeproc,
                                    reader_sizeproc, reader_mapproc,
                                    reader_unmapproc);
+#else
+            m_tif = TIFFClientOpen(m_filename.c_str(), "rm", ioproxy(),
+                                   reader_readproc, reader_writeproc,
+                                   reader_seekproc, reader_closeproc,
+                                   reader_sizeproc, reader_mapproc,
+                                   reader_unmapproc);
+#endif
         } else {
-#ifdef _WIN32
+#if OIIO_TIFFLIB_VERSION >= 40500
+#    ifdef _WIN32
+            std::wstring wfilename = Strutil::utf8_to_utf16wstring(m_filename);
+            m_tif = TIFFOpenWExt(wfilename.c_str(), "rm", openopts);
+#    else
+            m_tif = TIFFOpenExt(m_filename.c_str(), "rm", openopts);
+#    endif
+#else
+#    ifdef _WIN32
             std::wstring wfilename = Strutil::utf8_to_utf16wstring(m_filename);
             m_tif                  = TIFFOpenW(wfilename.c_str(), "rm");
-#else
+#    else
             m_tif = TIFFOpen(m_filename.c_str(), "rm");
+#    endif
 #endif
         }
+#if OIIO_TIFFLIB_VERSION >= 40500
+        TIFFOpenOptionsFree(openopts);
+#endif
         if (m_tif == NULL) {
             std::string e = oiio_tiff_last_error();
-            errorf("Could not open file: %s", e.length() ? e : m_filename);
+            errorfmt("Could not open file: {}", e.length() ? e : m_filename);
+            close_tif();
             return false;
         }
         m_is_byte_swapped = TIFFIsByteSwapped(m_tif);
@@ -758,30 +822,11 @@ TIFFInput::seek_subimage(int subimage, int miplevel)
     if (subimage == m_subimage || TIFFSetDirectory(m_tif, subimage)) {
         m_subimage = subimage;
         readspec(read_meta);
-        // OK, some edge cases we just don't handle. For those, fall back on
-        // the TIFFRGBA interface.
-        bool is_jpeg         = (m_compression == COMPRESSION_JPEG
-                        || m_compression == COMPRESSION_OJPEG);
-        bool is_nonspectral  = (m_photometric == PHOTOMETRIC_YCBCR
-                               || m_photometric == PHOTOMETRIC_CIELAB
-                               || m_photometric == PHOTOMETRIC_ICCLAB
-                               || m_photometric == PHOTOMETRIC_ITULAB
-                               || m_photometric == PHOTOMETRIC_LOGL
-                               || m_photometric == PHOTOMETRIC_LOGLUV);
-        m_use_rgba_interface = false;
-        m_rgbadata.clear();
-        if ((is_jpeg && m_spec.nchannels != 3)
-            || (is_nonspectral && !m_raw_color)) {
-            char emsg[1024];
-            m_use_rgba_interface = true;
-            if (!TIFFRGBAImageOK(m_tif, emsg)) {
-                errorf("No support for this flavor of TIFF file (%s)", emsg);
-                return false;
-            }
-            // This falls back to looking like uint8 images
-            m_spec.format = TypeDesc::UINT8;
-            m_spec.channelformats.clear();
-            m_photometric = PHOTOMETRIC_RGB;
+
+        char emsg[1024];
+        if (m_use_rgba_interface && !TIFFRGBAImageOK(m_tif, emsg)) {
+            errorfmt("No support for this flavor of TIFF file ({})", emsg);
+            return false;
         }
         if (size_t(subimage) >= m_subimage_specs.size())  // make room
             m_subimage_specs.resize(
@@ -791,31 +836,16 @@ TIFFInput::seek_subimage(int subimage, int miplevel)
             m_subimage_specs[subimage] = m_spec;
         }
         if (m_spec.format == TypeDesc::UNKNOWN) {
-            errorf("No support for data format of \"%s\"", m_filename);
+            errorfmt("No support for data format of \"{}\"", m_filename);
             return false;
         }
-        if (pvt::limit_channels && m_spec.nchannels > pvt::limit_channels) {
-            errorfmt(
-                "{} channels exceeds \"limits:channels\" = {}. Possible corrupt input?\nIf you're sure this is a valid file, raise the OIIO global attribute \"limits:channels\".",
-                m_spec.nchannels, pvt::limit_channels);
+        if (!check_open(m_spec,
+                        { 0, 1 << 20, 0, 1 << 20, 0, 1 << 16, 0, 1 << 16 }))
             return false;
-        }
-        if (pvt::limit_imagesize_MB
-            && m_spec.image_bytes(true)
-                   > pvt::limit_imagesize_MB * imagesize_t(1024 * 1024)) {
-            errorfmt(
-                "Uncompressed image size {:.1f} MB exceeds the {} MB limit.\n"
-                "Image claimed to be {}x{}, {}-channel {}. Possible corrupt input?\n"
-                "If this is a valid file, raise the OIIO attribute \"limits:imagesize_MB\".",
-                float(m_spec.image_bytes(true)) / float(1024 * 1024),
-                pvt::limit_imagesize_MB, m_spec.width, m_spec.height,
-                m_spec.nchannels, m_spec.format);
-            return false;
-        }
         return true;
     } else {
         std::string e = oiio_tiff_last_error();
-        errorf("%s", e.length() ? e : m_filename);
+        errorfmt("Err: {}", e.length() ? e : m_filename);
         m_subimage = -1;
         return false;
     }
@@ -1047,6 +1077,15 @@ TIFFInput::readspec(bool read_meta)
     // Now we need to get fields "by hand" for anything else that is less
     // straightforward...
 
+    m_compression = 0;
+    TIFFGetFieldDefaulted(m_tif, TIFFTAG_COMPRESSION, &m_compression);
+    m_spec.attribute("tiff:Compression", (int)m_compression);
+
+    m_photometric = (m_spec.nchannels == 1 ? PHOTOMETRIC_MINISBLACK
+                                           : PHOTOMETRIC_RGB);
+    TIFFGetField(m_tif, TIFFTAG_PHOTOMETRIC, &m_photometric);
+    m_spec.attribute("tiff:PhotometricInterpretation", (int)m_photometric);
+
     readspec_photometric();
 
     TIFFGetFieldDefaulted(m_tif, TIFFTAG_PLANARCONFIG, &m_planarconfig);
@@ -1059,9 +1098,6 @@ TIFFInput::readspec(bool read_meta)
     else
         m_spec.attribute("planarconfig", "contig");
 
-    m_compression = 0;
-    TIFFGetFieldDefaulted(m_tif, TIFFTAG_COMPRESSION, &m_compression);
-    m_spec.attribute("tiff:Compression", (int)m_compression);
     if (const char* compressname = tiff_compression_name(m_compression))
         m_spec.attribute("compression", compressname);
     m_predictor = PREDICTOR_NONE;
@@ -1195,7 +1231,6 @@ TIFFInput::readspec(bool read_meta)
                            errormsg);
     }
 
-#if TIFFLIB_VERSION > 20050912 /* compat with old TIFF libs - skip Exif */
     // Search for an EXIF IFD in the TIFF file, and if found, rummage
     // around for Exif fields.
     toff_t exifoffset = 0;
@@ -1221,9 +1256,7 @@ TIFFInput::readspec(bool read_meta)
         // that requires a TIFFSetDirectory to set things straight again.
         TIFFSetDirectory(m_tif, m_subimage);
     }
-#endif
 
-#if TIFFLIB_VERSION >= 20051230
     // Search for IPTC metadata in IIM form -- but older versions of
     // libtiff botch the size, so ignore it for very old libtiff.
     int iptcsize         = 0;
@@ -1245,7 +1278,6 @@ TIFFInput::readspec(bool read_meta)
         }
         decode_iptc_iim(&iptc[0], iptcsize, m_spec);
     }
-#endif
 
     // Search for an XML packet containing XMP (IPTC, Exif, etc.)
     int xmlsize         = 0;
@@ -1330,10 +1362,6 @@ TIFFInput::readspec(bool read_meta)
 void
 TIFFInput::readspec_photometric()
 {
-    m_photometric = (m_spec.nchannels == 1 ? PHOTOMETRIC_MINISBLACK
-                                           : PHOTOMETRIC_RGB);
-    TIFFGetField(m_tif, TIFFTAG_PHOTOMETRIC, &m_photometric);
-    m_spec.attribute("tiff:PhotometricInterpretation", (int)m_photometric);
     switch (m_photometric) {
     case PHOTOMETRIC_SEPARATED: {
         // Photometric "separated" is "usually CMYK".
@@ -1430,6 +1458,36 @@ TIFFInput::readspec_photometric()
         // allowed?  And if so, ever encountered in the wild?
         break;
     }
+    }
+
+    // For some PhotometricInterpretation modes that are both rare and hairy
+    // to handle, we use libtiff's TIFFRGBA interface and have it give us 8
+    // bit RGB values.
+    bool is_jpeg         = (m_compression == COMPRESSION_JPEG
+                    || m_compression == COMPRESSION_OJPEG);
+    bool is_nonspectral  = (m_photometric == PHOTOMETRIC_YCBCR
+                           || m_photometric == PHOTOMETRIC_CIELAB
+                           || m_photometric == PHOTOMETRIC_ICCLAB
+                           || m_photometric == PHOTOMETRIC_ITULAB
+                           || m_photometric == PHOTOMETRIC_LOGL
+                           || m_photometric == PHOTOMETRIC_LOGLUV);
+    m_use_rgba_interface = false;
+    m_rgbadata.clear();
+    if ((is_jpeg && m_spec.nchannels != 3)
+        || (is_nonspectral && !m_raw_color)) {
+        m_use_rgba_interface = true;
+        // This falls back to looking like uint8 images
+        m_spec.format = TypeDesc::UINT8;
+        m_spec.channelformats.clear();
+        m_photometric = PHOTOMETRIC_RGB;
+    }
+
+    // If we're not using the RGBA interface, but we have one of these
+    // non-spectral color spaces, set the OIIO color space attribute to
+    // the tiff:colorspace value.
+    if (is_nonspectral && !m_use_rgba_interface) {
+        m_spec.attribute("oiio:ColorSpace",
+                         m_spec.get_string_attribute("tiff:ColorSpace"));
     }
 }
 
@@ -1609,7 +1667,7 @@ TIFFInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
                                                 m_rgbadata.data(),
                                                 ORIENTATION_TOPLEFT, 0);
             if (!ok) {
-                errorf("Unknown error trying to read TIFF as RGBA");
+                errorfmt("Unknown error trying to read TIFF as RGBA");
                 return false;
             }
         }
@@ -1664,7 +1722,9 @@ TIFFInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
             for (int c = 0; c < planes; ++c) { /* planes==1 for contig */
                 if (TIFFReadScanline(m_tif, &m_scratch[0], m_next_scanline, c)
                     < 0) {
-                    errorf("%s", oiio_tiff_last_error());
+#if OIIO_TIFFLIB_VERSION < 40500
+                    errorfmt("{}", oiio_tiff_last_error());
+#endif
                     return false;
                 }
             }
@@ -1678,7 +1738,9 @@ TIFFInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
     if (m_photometric == PHOTOMETRIC_PALETTE) {
         // Convert from palette to RGB
         if (TIFFReadScanline(m_tif, &m_scratch[0], y) < 0) {
-            errorf("%s", oiio_tiff_last_error());
+#if OIIO_TIFFLIB_VERSION < 40500
+            errorfmt("{}", oiio_tiff_last_error());
+#endif
             return false;
         }
         if (m_bitspersample <= 8)
@@ -1702,7 +1764,9 @@ TIFFInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
     // only do one TIFFReadScanline.
     for (int c = 0; c < planes; ++c) { /* planes==1 for contig */
         if (TIFFReadScanline(m_tif, &readbuf[plane_bytes * c], y, c) < 0) {
-            errorf("%s", oiio_tiff_last_error());
+#if OIIO_TIFFLIB_VERSION < 40500
+            errorfmt("{}", oiio_tiff_last_error());
+#endif
             return false;
         }
     }
@@ -1771,7 +1835,7 @@ TIFFInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
                         m_inputchannels, (unsigned short*)data,
                         m_spec.nchannels);
         } else {
-            errorf("CMYK only supported for UINT8, UINT16");
+            errorfmt("CMYK only supported for UINT8, UINT16");
             return false;
         }
     }
@@ -1887,9 +1951,9 @@ TIFFInput::read_native_scanlines(int subimage, int miplevel, int ybegin,
                                              tmsize_t(cbound));
             if (csize < 0) {
                 std::string err = oiio_tiff_last_error();
-                errorf("TIFFRead%sStrip failed reading line y=%d,z=%d: %s",
-                       read_raw_strips ? "Raw" : "Encoded", y, z,
-                       err.size() ? err.c_str() : "unknown error");
+                errorfmt("TIFFRead{}Strip failed reading line y={},z={}: {}",
+                         read_raw_strips ? "Raw" : "Encoded", y, z,
+                         err.size() ? err.c_str() : "unknown error");
                 ok = false;
             }
             auto out            = this;
@@ -1931,8 +1995,8 @@ TIFFInput::read_native_scanlines(int subimage, int miplevel, int ybegin,
                                                      tmsize_t(mystrip_bytes));
                 if (csize < 0) {
                     std::string err = oiio_tiff_last_error();
-                    errorf(
-                        "TIFFReadEncodedStrip failed reading line y=%d,z=%d: %s",
+                    errorfmt(
+                        "TIFFReadEncodedStrip failed reading line y={},z={}: {}",
                         y, z, err.size() ? err.c_str() : "unknown error");
                     ok = false;
                 }
@@ -1984,7 +2048,7 @@ TIFFInput::read_native_tile(int subimage, int miplevel, int x, int y, int z,
         m_rgbadata.resize(m_spec.tile_pixels());
         bool ok = TIFFReadRGBATile(m_tif, x, y, m_rgbadata.data());
         if (!ok) {
-            errorf("Unknown error trying to read TIFF as RGBA");
+            errorfmt("Unknown error trying to read TIFF as RGBA");
             return false;
         }
         // Copy, and use stride magic to reverse top-to-bottom, because
@@ -2019,7 +2083,9 @@ TIFFInput::read_native_tile(int subimage, int miplevel, int x, int y, int z,
     if (m_photometric == PHOTOMETRIC_PALETTE) {
         // Convert from palette to RGB
         if (TIFFReadTile(m_tif, &m_scratch[0], x, y, z, 0) < 0) {
-            errorf("%s", oiio_tiff_last_error());
+#if OIIO_TIFFLIB_VERSION < 40500
+            errorfmt("{}", oiio_tiff_last_error());
+#endif
             return false;
         }
         if (m_bitspersample <= 8)
@@ -2043,7 +2109,9 @@ TIFFInput::read_native_tile(int subimage, int miplevel, int x, int y, int z,
         for (int c = 0; c < planes; ++c) /* planes==1 for contig */
             if (TIFFReadTile(m_tif, &readbuf[plane_bytes * c], x, y, z, c)
                 < 0) {
-                errorf("%s", oiio_tiff_last_error());
+#if OIIO_TIFFLIB_VERSION < 40500
+                errorfmt("{}", oiio_tiff_last_error());
+#endif
                 return false;
             }
         if (m_bitspersample < 8) {
@@ -2169,8 +2237,8 @@ TIFFInput::read_native_tiles(int subimage, int miplevel, int xbegin, int xend,
                                              tmsize_t(cbound));
                 if (csize < 0) {
                     std::string err = oiio_tiff_last_error();
-                    errorf(
-                        "TIFFReadRawTile failed reading tile x=%d,y=%d,z=%d: %s",
+                    errorfmt(
+                        "TIFFReadRawTile failed reading tile x={},y={},z={}: {}",
                         x, y, z, err.size() ? err.c_str() : "unknown error");
                     ok = false;
                     break;

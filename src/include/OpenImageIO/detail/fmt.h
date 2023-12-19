@@ -1,10 +1,11 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #pragma once
 #define OIIO_FMT_H
 
+#include <OpenImageIO/dassert.h>
 #include <OpenImageIO/platform.h>
 #include <OpenImageIO/type_traits.h>
 
@@ -16,6 +17,14 @@
 // Disable fmt exceptions
 #ifndef FMT_EXCEPTIONS
 #    define FMT_EXCEPTIONS 0
+#endif
+
+// Redefining FMT_THROW to something benign seems to avoid some UB or possibly
+// gcc 11+ compiler bug triggered by the definition of FMT_THROW in fmt 10.1+
+// when FMT_EXCEPTIONS=0, which results in mangling SIMD math. This nugget
+// below works around the problems for hard to understand reasons.
+#if !defined(FMT_THROW) && OIIO_GNUC_VERSION >= 110000
+#    define FMT_THROW(x) OIIO_ASSERT_MSG(0, "fmt exception: %s", (x).what())
 #endif
 
 // Use the grisu fast floating point formatting for old fmt versions
@@ -41,6 +50,9 @@
 OIIO_PRAGMA_WARNING_PUSH
 #if OIIO_GNUC_VERSION >= 70000
 #    pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#if OIIO_GNUC_VERSION >= 130000
+#    pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
 #if OIIO_INTEL_LLVM_COMPILER
 #    pragma GCC diagnostic ignored "-Wtautological-constant-compare"

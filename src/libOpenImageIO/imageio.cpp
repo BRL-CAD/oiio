@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,14 +41,18 @@ atomic_int oiio_threads(threads_default());
 atomic_int oiio_exr_threads(threads_default());
 atomic_int oiio_read_chunk(256);
 atomic_int oiio_try_all_readers(1);
-int openexr_core(0);  // Should we use "Exr core C library"?
+#ifndef OIIO_OPENEXR_CORE_DEFAULT
+#    define OIIO_OPENEXR_CORE_DEFAULT 0
+#endif
+// Should we use "Exr core C library"?
+int openexr_core(OIIO_OPENEXR_CORE_DEFAULT);
 int tiff_half(0);
 int tiff_multithread(1);
 int dds_bc5normal(0);
 int limit_channels(1024);
 int limit_imagesize_MB(std::min(32 * 1024,
                                 int(Sysutil::physical_memory() >> 20)));
-ustring font_searchpath;
+ustring font_searchpath(Sysutil::getenv("OPENIMAGEIO_FONTS"));
 ustring plugin_searchpath(OIIO_DEFAULT_PLUGIN_SEARCHPATH);
 std::string format_list;         // comma-separated list of all formats
 std::string input_format_list;   // comma-separated list of readable formats
@@ -56,6 +60,7 @@ std::string output_format_list;  // comma-separated list of writable formats
 std::string extension_list;      // list of all extensions for all formats
 std::string library_list;        // list of all libraries for all formats
 int oiio_log_times = Strutil::stoi(Sysutil::getenv("OPENIMAGEIO_LOG_TIMES"));
+int oiio_print_uncaught_errors(1);
 std::vector<float> oiio_missingcolor;
 }  // namespace pvt
 
@@ -81,18 +86,20 @@ public:
             std::cout << report();
     }
 
-    // Call like a function to record times (but only if oiio_log_times > 0)
-    void operator()(string_view key, const Timer& timer)
+    // Call like a function to record times (but only if oiio_log_times > 0).
+    // The `count` parameter is the number of times the operation was invoked,
+    // as tallied by the timer (defaulting to 1).
+    void operator()(string_view key, const Timer& timer, int count = 1)
     {
         if (oiio_log_times) {
             auto t = timer();
             spin_lock lock(mutex);
             auto entry = timing_map.find(key);
             if (entry == timing_map.end())
-                timing_map[key] = std::make_pair(t, size_t(1));
+                timing_map[key] = std::make_pair(t, size_t(count));
             else {
                 entry->second.first += t;
-                entry->second.second += 1;
+                entry->second.second += count;
             }
         }
     }
@@ -204,6 +211,11 @@ oiio_simd_caps()
     // clang-format on
 }
 
+void
+shutdown()
+{
+    default_thread_pool_shutdown();
+}
 
 
 int
@@ -214,9 +226,29 @@ openimageio_version()
 
 
 
+// ErrorHolder houses a string, with the addition that when it is destroyed,
+// it will disgorge any un-retrieved error messages, in an effort to help
+// beginning users diagnose their problems if they have forgotten to call
+// geterror().
+struct ErrorHolder {
+    std::string error_msg;
+
+    ~ErrorHolder()
+    {
+        if (!error_msg.empty() && pvt::oiio_print_uncaught_errors) {
+            OIIO::print(
+                "OpenImageIO exited with a pending error message that was never\n"
+                "retrieved via OIIO::geterror(). This was the error message:\n{}\n",
+                error_msg);
+        }
+    }
+};
+
+
+
 // To avoid thread oddities, we have the storage area buffering error
 // messages for append_error()/geterror() be thread-specific.
-static thread_local std::string error_msg;
+static thread_local ErrorHolder error_msg_holder;
 
 
 void
@@ -225,6 +257,7 @@ pvt::append_error(string_view message)
     // Remove a single trailing newline
     if (message.size() && message.back() == '\n')
         message.remove_suffix(1);
+    std::string& error_msg(error_msg_holder.error_msg);
     OIIO_ASSERT(
         error_msg.size() < 1024 * 1024 * 16
         && "Accumulated error messages > 16MB. Try checking return codes!");
@@ -245,6 +278,7 @@ pvt::append_error(string_view message)
 bool
 has_error()
 {
+    std::string& error_msg(error_msg_holder.error_msg);
     return !error_msg.empty();
 }
 
@@ -253,6 +287,7 @@ has_error()
 std::string
 geterror(bool clear)
 {
+    std::string& error_msg(error_msg_holder.error_msg);
     std::string e = error_msg;
     if (clear)
         error_msg.clear();
@@ -270,9 +305,9 @@ debug(string_view message)
 
 
 void
-pvt::log_time(string_view key, const Timer& timer)
+pvt::log_time(string_view key, const Timer& timer, int count)
 {
-    timing_log(key, timer);
+    timing_log(key, timer, count);
 }
 
 
@@ -331,6 +366,18 @@ attribute(string_view name, TypeDesc type, const void* val)
     }
     if (name == "limits:imagesize_MB" && type == TypeInt) {
         limit_imagesize_MB = *(const int*)val;
+        return true;
+    }
+    if (name == "oiio:print_uncaught_errors" && type == TypeInt) {
+        oiio_print_uncaught_errors = *(const int*)val;
+        return true;
+    }
+    if (name == "imagebuf:print_uncaught_errors" && type == TypeInt) {
+        imagebuf_print_uncaught_errors = *(const int*)val;
+        return true;
+    }
+    if (name == "imagebuf:use_imagecache" && type == TypeInt) {
+        imagebuf_use_imagecache = *(const int*)val;
         return true;
     }
     if (name == "use_tbb" && type == TypeInt) {
@@ -421,6 +468,18 @@ getattribute(string_view name, TypeDesc type, void* val)
         *(ustring*)val = ustring(library_list);
         return true;
     }
+    if (name == "font_dir_list" && type == TypeString) {
+        *(ustring*)val = ustring(Strutil::join(font_dirs(), ";"));
+        return true;
+    }
+    if (name == "font_file_list" && type == TypeString) {
+        *(ustring*)val = ustring(Strutil::join(font_file_list(), ";"));
+        return true;
+    }
+    if (name == "font_list" && type == TypeString) {
+        *(ustring*)val = ustring(Strutil::join(font_list(), ";"));
+        return true;
+    }
     if (name == "exr_threads" && type == TypeInt) {
         *(int*)val = oiio_exr_threads;
         return true;
@@ -447,6 +506,18 @@ getattribute(string_view name, TypeDesc type, void* val)
     }
     if (name == "dds:bc5normal" && type == TypeInt) {
         *(int*)val = dds_bc5normal;
+        return true;
+    }
+    if (name == "oiio:print_uncaught_errors" && type == TypeInt) {
+        *(int*)val = oiio_print_uncaught_errors;
+        return true;
+    }
+    if (name == "imagebuf:print_uncaught_errors" && type == TypeInt) {
+        *(int*)val = imagebuf_print_uncaught_errors;
+        return true;
+    }
+    if (name == "imagebuf:use_imagecache" && type == TypeInt) {
+        *(int*)val = imagebuf_use_imagecache;
         return true;
     }
     if (name == "use_tbb" && type == TypeInt) {
@@ -505,6 +576,22 @@ getattribute(string_view name, TypeDesc type, void* val)
     }
     if (name == "opencv_version" && type == TypeInt) {
         *(int*)val = OIIO::pvt::opencv_version;
+        return true;
+    }
+    if (name == "IB_local_mem_current" && type == TypeInt64) {
+        *(long long*)val = IB_local_mem_current;
+        return true;
+    }
+    if (name == "IB_local_mem_peak" && type == TypeInt64) {
+        *(long long*)val = IB_local_mem_peak;
+        return true;
+    }
+    if (name == "IB_total_open_time" && type == TypeFloat) {
+        *(float*)val = IB_total_open_time;
+        return true;
+    }
+    if (name == "IB_total_image_read_time" && type == TypeFloat) {
+        *(float*)val = IB_total_image_read_time;
         return true;
     }
     return false;

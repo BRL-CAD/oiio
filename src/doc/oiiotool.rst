@@ -136,18 +136,23 @@ contents of an expression may be any of:
     `ImageDescription`, or `width`)
   * `filename` : the name of the file (e.g., `foo.tif`)
   * `file_extension` : the extension of the file (e.g., `tif`)
-  * `geom` : the pixel data size in the form `640x480+0+0`)
   * `full_geom` : the "full" or "display" size)
+  * `geom` : the pixel data size in the form `640x480+0+0`)
+  * `nativeformat` : the pixel data type from the file.
   * `MINCOLOR` : the minimum value of each channel over the entire image
     (channels are comma-separated)
   * `MAXCOLOR` : the maximum value of each channel over the entire image
     (channels are comma-separated)
   * `AVGCOLOR` : the average pixel value of the image (channels are
     comma-separated)
-  * `METABRIEF` : a string containing the brief one-line description that
-    would be printed with `oiiotool -info`.
-  * `META` : a multi-line string containing the full metadata that would
-    be printed with `oiiotool -info -v`.
+  * `META` : a multi-line string containing the full metadata of the image,
+    similar to what would be printed with `oiiotool -info -v`.
+  * `METABRIEF` : a string containing the brief one-line description,
+    similar to what would be printed that with `oiiotool -info`.
+  * `METANATIVE` : like `META`, but for the "native" original information from
+    when the file was read from disk.
+  * `METANATIVEBRIEF` : like `METABRIEF`, but for the "native" original
+    information from when the file was read from disk.
   * `STATS` : a multi-line string containing the image statistics that would
     be printed with `oiiotool -stats`.
 
@@ -911,8 +916,8 @@ output each one to a different file, with names `sub0001.tif`,
 
 .. option:: --cache <size>
 
-    Set the underlying ImageCache size (in MB). See Section
-    :ref:`sec-imagecache-api`.
+    Causes images to be read through an ImageCache and set the underlying
+    cache size (in MB). See Section :ref:`sec-imagecache-api`.
 
 .. option:: --oiioattrib <name> <value>
 
@@ -1067,6 +1072,30 @@ output each one to a different file, with names `sub0001.tif`,
     will cease processing that frame, but continue iterating with the next
     frame (rather than the default behavior of exiting immediately and not
     even attempting the other frames in the range).
+
+.. option:: --parallel-frames
+
+    When iterating over a frame range or views, if this option is used, the
+    frames will run *concurrently* and not necessarily in any deterministic
+    order.
+
+    Running the range of frames in parallel is helpful in cases where (a)
+    there are enough frames in the range to make it be better to parallelize
+    over the range rather than within each operation (rule of thumb: you
+    should probably have at least as many frames to process as cores
+    available); (b) it doesn't matter what order the frames are processed in
+    (e.g., no frames have a dependency on the computed results of earlier
+    frames); and (c) you have enough memory and I/O bandwidth to handle all
+    the parallel jobs (probably equal to the number of cores).
+
+    Without the `--parallel-frames` option, the frame range will be executed
+    in increasing numerical order and each frame in the range will run to
+    completion before the next one starts. Multithreading will be used for the
+    individual operations done to each frame. This mode is less efficient if
+    you have more frames than cores available, but it is guaranteed to be safe
+    even if there are order or data dependencies between your frames, and it
+
+    This feature was added to OpenImageIO 2.5.1.
 
 .. option:: --wildcardoff, --wildcardon
 
@@ -1235,29 +1264,30 @@ These are all non-positional flags that affect how all images are read in the
 
 .. option:: --native
 
-    Normally, all images read by :program:`oiiotool` are read into an
-    ImageBuf backed by an underlying ImageCache, and are automatically
+    Normally, all images read by :program:`oiiotool` are automatically
     converted to `float` pixels for internal storage (because any subsequent
     image processing is usually much faster and more accurate when done on
-    floating-point values).
+    floating-point values), and also if the `--cache` option is used, the
+    reading and storage of images will be mediated through an ImageCache.
 
-    This option causes (1) input images to be stored internally in their
-    native pixel data type rather than converted to float, and (2) to bypass
-    the ImageCache (reading directly into an ImageBuf) if the pixel data
-    type is not one of the types that is supported internally to ImageCache
-    (`UINT8`, `uint16`, `half`, and `float`).
+    The `--native` option causes input images to be stored internally in their
+    native pixel data type of th file rather than converted to float. Also,
+    even if the `--cache` option is used, reads will bypass the ImageCache
+    (reading directly into an ImageBuf) if the pixel data type is not one of
+    the types that is supported internally by ImageCache (`UINT8`, `uint16`,
+    `half`, and `float`).
 
-    images whose pixels are comprised of data types that are not natively
-    representable exactly in the ImageCache to bypass the ImageCache and be
-    read directly into an ImageBuf.
-
-    The typical use case for this is when you know you are dealing with
-    unusual pixel data types that might lose precision if converted to
-    `float` (for example, if you have images with `uint32` or `double`
-    pixels). Another use case is if you are using :program:`oiiotool` merely
-    for file format or data format conversion, with no actual image
-    processing math performed on the pixel values -- in that case, you might
-    save time and memory by bypassing the conversion to `float`.
+    There are three uses cases where `--native` might be very helpful: (a) If
+    you are using :program:`oiiotool` merely for file format or data format
+    conversion, with no actual image processing math performed on the pixel
+    values -- in that case, you might save time and memory by avoiding the
+    conversion to `float`. (b) If you are reading exceptionally large images
+    that have smaller data types than `float` (for example, `uint8` pixels),
+    and the only way to make the images fit in memory are to store them as
+    uint8 rather than converting to float (which takes 4 times as much space
+    in memory). (c) If you know the file has unusual pixel data types that
+    might lose precision if converted to `float` (for example, if you have
+    images with `uint32` or `double` pixels).
 
 .. option:: --autotile <tilesize>
 
@@ -1376,7 +1406,7 @@ Writing images
     
       `:type=` *name*
         Set the pixel data type (like `-d`) for this output image (e.g.,
-        `:uint8`, `uint16`, `half`, `float`, etc.).
+        `uint8`, `uint16`, `half`, `float`, etc.).
       `:bits=` *int*
         Set the bits per pixel (if nonstandard for the datatype) for this
         output image.
@@ -1666,11 +1696,40 @@ Writing images
 
 .. option:: --printinfo
 
-    Prints information and all metadata about the current image.
+    Prints information and all metadata about the current (top) image. This
+    behavior is similar to invoking oiiotool with :option:`--info -v`, but it
+    applies immediately to the current top image, even if it is a "computed"
+    image (whereas :option:`--info` only applies to images as they are read
+    from disk).
+
+    Optional appended modifiers include:
+
+    - `:allsubimages=` *int*
+        If nonzero, stats will be printed about all subimages of the current
+        image. (The default is given by whether or not the `-a` option was
+        used.)
+
+    - `:native=1`
+        Print metadata reflecting the "native" image as it was originally
+        read from disk. This may have a data type, tile size, or other
+        items that differ from the current in-memory representation of
+        the image.
+
+    - `:stats=1`
+        Print statistics about the image (much like the :option:`--stats`
+        command).
+
+    - `:verbose=0`
+        Overrides the default verbosity (1, on) with a less verbose output.
+
 
 .. option:: --printstats
 
-    Prints detailed statistical information about the current image.
+    Prints detailed statistical information about the current image. This
+    behavior is similar to invoking oiiotool with :option:`--stats`, but it
+    applies immediately to the current top image, even if it is a "computed"
+    image (whereas :option:`--stats` only applies to images as they are read
+    from disk).
 
     Optional appended modifiers include:
 
@@ -1686,8 +1745,8 @@ Writing images
 
     - `:allsubimages=` *int*
         If nonzero, stats will be printed about all subimages of the current
-        image. (The default is zero, meaning that stats will only be printed for
-        the first subimage of the current image.)
+        image. (The default is given by whether or not the `-a` option was
+        used.)
 
 .. option:: --colorcount r1,g1,b1,...:r2,g2,b2,...:...
 
@@ -2499,6 +2558,38 @@ current top image.
         Include/exclude subimages (see :ref:`sec-oiiotool-subimage-modifier`).
 
 
+.. option:: --normalize
+
+    Normalize the top image. Assuming the first three channels represent a 3D
+    vector, divide each pixel by its length to make it unit length. This
+    function assumes a 3-channel image that represents a 3-vector, or a
+    4-channel image that represents a 3-vector plus an alpha value. If an
+    alpha channel is present, its value is merely copied, and is not part of
+    the normalization computation.
+
+    Optional appended modifiers include:
+
+      `:incenter=` *float*
+        The pixel value that corresponds to a 0.0 vector value for the input.
+        (default: 0.0)
+
+      `:outcenter=` *float*
+        The pixel value that corresponds to a 0.0 vector value for the output.
+        (default: 0.0)
+
+      `:scale=` *float*
+        The desired length of the output vectors. (default: 1.0)
+
+    Example::
+
+        # Normalize a floating point image containing vector values:
+        oiiotool xyzvectors.exr --normalize -o normalized.exr
+
+        # Normalize an unsigned integer image where [-1,1] vector values
+        # are encoded on [0,1] for both input and output:
+        oiiotool xyzvectors.tif --normalize:incenter=0.5:outcenter=0.5:scale=0.5 -o normalized.tif
+
+
 .. option:: --noise
 
     Alter the top image to introduce noise, with the option `:type=`
@@ -3140,10 +3231,28 @@ current top image.
 
             *wscale% x hscale%*
 
-    if `width` or `height` is 0, that dimension will be
-    automatically computed so as to preserve the original aspect ratio.
+    If `width` or `height` is 0, that dimension will be automatically computed
+    so as to preserve the original aspect ratio.
+
+    By default, the scaling that occurs is to map the *full/display* window
+    area of the input image to the full/display window of the output image
+    (determined by the `size` argument). However, a more general warping
+    can be specified using any of the `:from=`, `:to=`, or `:offset=`
+    optional modifiers. (These modifiers were added in OpenmageIO 2.5.)
 
     Optional appended modifiers include:
+
+      `:from=` *size*
+        The region (specified in any of the same forms as the *size* argument,
+        with decimal / partial pixel sizes and offsets allowed) of the source
+        image that defines the transformational mapping. This defaults to the
+        full/display window of the source image.
+
+      `:to=` *size*
+        The region (specified in any of the same forms as the *size* argument,
+        with decimal / partial pixel sizes and offsets allowed) of the
+        destination image that defines the transformational mapping. This
+        defaults to the full/display window of the destination image.
 
       `:filter=` *name*
         Filter name. The default is `blackman-harris` when increasing
@@ -3155,6 +3264,11 @@ current top image.
         `--rangeexpand`, which can reduce visible ringing artifacts when a
         filter with negative lobes is used on a very high-contrast HDR image.
 
+      `:edgeclamp=` *bool*
+        If nonzero, clamp the image to the edge pixels before filtering.
+        This might help with certain edge ringing situations. The default is
+        0 (off).
+
       `:subimages=` *indices-or-names*
         Include/exclude subimages (see :ref:`sec-oiiotool-subimage-modifier`).
 
@@ -3165,6 +3279,15 @@ current top image.
         --resize 300%             # increase resolution to 1920x1440
         --resize 400x0            # new resolution will be 400x300
 
+        # Create a 1024x768 image that is a resized and shifted version
+        # of the original, where the upper left 100x100 section of the
+        # original maps to a 200x200 region starting at the 50,50
+        # coordinates of the new image.
+        --resize:from=100x100:to=200x200+50+50 1024x768
+
+       # Resize to 320x240, but with an additional 1/2 pixel shift in
+       # each direction.
+       --resize:offset=+0.5+0.5 320x240
 
 .. option:: --fit <size>
 
@@ -3976,7 +4099,23 @@ versa).
 
 If you ask for :program:`oiiotool` help (`oiiotool --help`), at the very
 bottom you will see the list of all color spaces, looks, and displays that
-:program:`oiiotool` knows about.
+:program:`oiiotool` knows about. That information (including even more detail)
+will be printed with the command `oiiotool --colorconfiginfo`.
+
+.. option:: --colorconfiginfo
+
+    Print to the console extensive information about the color management
+    configuration, including the list of all known color spaces (and their
+    aliases), looks, displays (and their views), as well as which version
+    of OpenColorIO is being used, and the path to the configuration file.
+
+    This command was added in OIIO 2.4.6.
+
+.. option:: --colorconfig <filename>
+
+    Instruct :program:`oiiotool` to read an OCIO configuration from a custom
+    location. Without this, the default is to use the `$OCIO` environment
+    variable as a guide for the location of the configuration file.
 
 .. option:: --iscolorspace <colorspace>
 
@@ -3984,12 +4123,6 @@ bottom you will see the list of all color spaces, looks, and displays that
     in the named color space.  This does not alter the pixels of the image,
     it only changes :program:`oiiotool`'s understanding of what color space
     those those pixels are in.
-
-.. option:: --colorconfig <filename>
-
-    Instruct :program:`oiiotool` to read an OCIO configuration from a custom
-    location. Without this, the default is to use the `$OCIO` environment
-    variable as a guide for the location of the configuration file.
 
 .. option:: --colorconvert <fromspace> <tospace>
 
@@ -4160,6 +4293,10 @@ bottom you will see the list of all color spaces, looks, and displays that
         is 0, meaning the color transformation not will be automatically
         bracketed by divide-by-alpha / mult-by-alpha operations.
     
+      `inverse=` *val* :
+
+        If *val* is nonzero, inverts the color transformation.
+
       `:subimages=` *indices-or-names*
         Include/exclude subimages (see :ref:`sec-oiiotool-subimage-modifier`).
 

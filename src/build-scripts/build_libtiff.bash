@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Utility script to download and build libtiff
 
@@ -36,16 +36,17 @@ cd libtiff
 echo "git checkout ${LIBTIFF_VERSION} --force"
 git checkout ${LIBTIFF_VERSION} --force
 
-mkdir -p build
-cd build
-
 if [[ -z $DEP_DOWNLOAD_ONLY ]]; then
-    time cmake -DCMAKE_BUILD_TYPE=${LIBTIFF_BUILD_TYPE} \
+    time cmake -S . -B build \
+               -DCMAKE_BUILD_TYPE=${LIBTIFF_BUILD_TYPE} \
                -DCMAKE_INSTALL_PREFIX=${LIBTIFF_INSTALL_DIR} \
                -DCMAKE_CXX_FLAGS="${LIBTIFF_CXX_FLAGS}" \
                -DBUILD_SHARED_LIBS=${LIBTIFF_BUILD_SHARED_LIBS:-ON} \
-               ${LIBTIFF_BUILDOPTS} ..
-    time cmake --build . --target install
+               -Dtiff-tests=${LIBTIFF_BUILD_TESTS:-OFF} \
+               -Dtiff-docs=${LIBTIFF_BUILD_TESTS:-OFF} \
+               -Dlibdeflate=ON \
+               ${LIBTIFF_BUILDOPTS}
+    time cmake --build build --target install
 fi
 
 popd

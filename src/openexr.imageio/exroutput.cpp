@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cerrno>
 #include <cmath>
@@ -14,25 +14,15 @@
 #include <OpenImageIO/Imath.h>
 #include <OpenImageIO/platform.h>
 
+#include <OpenEXR/IlmThreadPool.h>
 #include <OpenEXR/ImfChannelList.h>
 #include <OpenEXR/ImfEnvmap.h>
 #include <OpenEXR/ImfOutputFile.h>
 #include <OpenEXR/ImfTiledOutputFile.h>
 
-#ifdef OPENEXR_VERSION_MAJOR
-#    define OPENEXR_CODED_VERSION                                    \
-        (OPENEXR_VERSION_MAJOR * 10000 + OPENEXR_VERSION_MINOR * 100 \
-         + OPENEXR_VERSION_PATCH)
-#else
-#    define OPENEXR_CODED_VERSION 20000
-#endif
-
-#if OPENEXR_CODED_VERSION >= 20400 \
-    || __has_include(<OpenEXR/ImfFloatVectorAttribute.h>)
-#    define OPENEXR_HAS_FLOATVECTOR 1
-#else
-#    define OPENEXR_HAS_FLOATVECTOR 0
-#endif
+#define OPENEXR_CODED_VERSION                                    \
+    (OPENEXR_VERSION_MAJOR * 10000 + OPENEXR_VERSION_MINOR * 100 \
+     + OPENEXR_VERSION_PATCH)
 
 // The way that OpenEXR uses dynamic casting for attributes requires
 // temporarily suspending "hidden" symbol visibility mode.
@@ -46,9 +36,7 @@ OIIO_GCC_PRAGMA(GCC diagnostic ignored "-Wunused-parameter")
 #include <OpenEXR/ImfCompressionAttribute.h>
 #include <OpenEXR/ImfEnvmapAttribute.h>
 #include <OpenEXR/ImfFloatAttribute.h>
-#if OPENEXR_HAS_FLOATVECTOR
-#    include <OpenEXR/ImfFloatVectorAttribute.h>
-#endif
+#include <OpenEXR/ImfFloatVectorAttribute.h>
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfIntAttribute.h>
 #include <OpenEXR/ImfKeyCodeAttribute.h>
@@ -222,6 +210,19 @@ private:
     // Helper: if the channel names are nonsensical, fix them to keep the
     // app from shooting itself in the foot.
     void sanity_check_channelnames();
+
+    bool copy_and_check_spec(const ImageSpec& srcspec, ImageSpec& dstspec)
+    {
+        // Arbitrarily limit res to 1M x 1M and 4k channels, assuming anything
+        // beyond that is more likely to be a mistake than a legit request. We
+        // may have to come back to this if these assumptions are wrong.
+        if (!check_open(Create, srcspec,
+                        { 0, 1 << 20, 0, 1 << 20, 0, 1, 0, 1 << 12 }))
+            return false;
+        if (&dstspec != &m_spec)
+            dstspec = m_spec;
+        return true;
+    }
 };
 
 
@@ -240,11 +241,7 @@ OIIO_EXPORT int openexr_imageio_version = OIIO_PLUGIN_VERSION;
 OIIO_EXPORT const char*
 openexr_imageio_library_version()
 {
-#ifdef OPENEXR_VERSION_STRING
     return "OpenEXR " OPENEXR_VERSION_STRING;
-#else
-    return "OpenEXR 1.x";
-#endif
 }
 
 OIIO_EXPORT const char* openexr_output_extensions[] = { "exr", "sxr", "mxr",
@@ -277,6 +274,25 @@ set_exr_threads()
         exr_threads = oiio_threads;
         Imf::setGlobalThreadCount(exr_threads);
     }
+
+#if OPENEXR_CODED_VERSION < 30108 && defined(_WIN32)
+    // If we're ever in this function, which we would be any time we use
+    // openexr threads, also proactively ensure that we exit the application,
+    // we force the OpenEXR threadpool to shut down because their destruction
+    // might cause us to hang on Windows when it tries to communicate with
+    // threads that would have already been terminated without releasing any
+    // held mutexes.
+    // Addendum: But only for OpenEXR < 3.1.8 (beyond that we think it's
+    // fixed on the OpenEXR side), and also only on Windows (the only platform
+    // where we've seen this be symptomatic).
+    static std::once_flag set_atexit_once;
+    std::call_once(set_atexit_once, []() {
+        std::atexit([]() {
+            // print("EXITING and setting ilmthreads = 0\n");
+            IlmThread::ThreadPool::globalThreadPool().setNumThreads(0);
+        });
+    });
+#endif
 }
 
 }  // namespace pvt
@@ -368,7 +384,7 @@ OpenEXROutput::open(const std::string& name, const ImageSpec& userspec,
         m_nmiplevels = 1;
         m_miplevel   = 0;
         m_headers.resize(1);
-        m_spec = userspec;  // Stash the spec
+        copy_and_check_spec(userspec, m_spec);
         sanity_check_channelnames();
         const ParamValue* param = m_spec.find_attribute("oiio:ioproxy",
                                                         TypeDesc::PTR);
@@ -528,7 +544,11 @@ OpenEXROutput::open(const std::string& name, int subimages,
     m_subimage   = 0;
     m_nmiplevels = 1;
     m_miplevel   = 0;
-    m_subimagespecs.assign(specs, specs + subimages);
+    m_subimagespecs.resize(subimages);
+    for (int i = 0; i < subimages; ++i)
+        if (!copy_and_check_spec(specs[i], m_subimagespecs[i]))
+            return false;
+
     m_headers.resize(subimages);
     std::string filetype;
     if (specs[0].deep)
@@ -653,23 +673,6 @@ bool
 OpenEXROutput::spec_to_header(ImageSpec& spec, int subimage,
                               Imf::Header& header)
 {
-    if (spec.width < 1 || spec.height < 1) {
-        errorf("Image resolution must be at least 1x1, you asked for %d x %d",
-               spec.width, spec.height);
-        return false;
-    }
-    if (spec.depth < 1)
-        spec.depth = 1;
-    if (spec.depth > 1) {
-        errorf("%s does not support volume images (depth > 1)", format_name());
-        return false;
-    }
-
-    if (spec.full_width <= 0)
-        spec.full_width = spec.width;
-    if (spec.full_height <= 0)
-        spec.full_height = spec.height;
-
     // Force use of one of the three data types that OpenEXR supports
     switch (spec.format.basetype) {
     case TypeDesc::UINT: spec.format = TypeDesc::UINT; break;
@@ -934,22 +937,14 @@ OpenEXROutput::put_parameter(const std::string& name, TypeDesc type,
                 header.compression() = Imf::PIZ_COMPRESSION;
             else if (Strutil::iequals(str, "pxr24"))
                 header.compression() = Imf::PXR24_COMPRESSION;
-#ifdef IMF_B44_COMPRESSION
-            // The enum Imf::B44_COMPRESSION is not defined in older versions
-            // of OpenEXR, and there are no explicit version numbers in the
-            // headers.  BUT this other related #define is present only in
-            // the newer version.
             else if (Strutil::iequals(str, "b44"))
                 header.compression() = Imf::B44_COMPRESSION;
             else if (Strutil::iequals(str, "b44a"))
                 header.compression() = Imf::B44A_COMPRESSION;
-#endif
-#if OPENEXR_CODED_VERSION >= 20200
             else if (Strutil::iequals(str, "dwaa"))
                 header.compression() = Imf::DWAA_COMPRESSION;
             else if (Strutil::iequals(str, "dwab"))
                 header.compression() = Imf::DWAB_COMPRESSION;
-#endif
         }
         return true;
     }
@@ -1278,15 +1273,13 @@ OpenEXROutput::put_parameter(const std::string& name, TypeDesc type,
                 header.insert(xname.c_str(), Imf::StringVectorAttribute(v));
                 return true;
             }
-#if OPENEXR_HAS_FLOATVECTOR
-            // float Vector -- only supported in OpenEXR >= 2.2
+            // float Vector
             if (type.basetype == TypeDesc::FLOAT) {
                 Imf::FloatVector v((const float*)data,
                                    (const float*)data + type.basevalues());
                 header.insert(xname.c_str(), Imf::FloatVectorAttribute(v));
                 return true;
             }
-#endif
         }
     } catch (const std::exception& e) {
         OIIO::debugfmt("Caught OpenEXR exception: {}\n", e.what());

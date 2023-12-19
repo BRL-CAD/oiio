@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <fstream>
 #include <sstream>
@@ -147,6 +147,39 @@ my_read_text_file(string_view filename)
 }
 
 
+inline std::string
+my_read_text_file(string_view filename, size_t size)
+{
+    std::string err;
+    std::string contents;
+    bool ok = Filesystem::read_text_file(filename, contents, size);
+    OIIO_CHECK_ASSERT(ok);
+    return contents;
+}
+
+
+inline std::string
+my_read_text_from_command(string_view filename)
+{
+    std::string err;
+    std::string contents;
+    bool ok = Filesystem::read_text_from_command(filename, contents);
+    OIIO_CHECK_ASSERT(ok);
+    return contents;
+}
+
+
+inline std::string
+my_read_text_from_command(string_view filename, size_t size)
+{
+    std::string err;
+    std::string contents;
+    bool ok = Filesystem::read_text_from_command(filename, contents, size);
+    OIIO_CHECK_ASSERT(ok);
+    return contents;
+}
+
+
 
 static void
 test_file_status()
@@ -166,7 +199,12 @@ test_file_status()
     std::cout << "Testing write_text_file\n";
     Filesystem::write_text_file("testfile4", testtext);
     OIIO_CHECK_EQUAL(my_read_text_file("testfile4"), testtext);
-
+    std::cout << "Testing read_text_file with size limit\n";
+    OIIO_CHECK_EQUAL(my_read_text_file("testfile", 10), "test\nfoo\nb");
+    std::cout << "Testing read_text_from_command\n";
+    OIIO_CHECK_EQUAL(my_read_text_from_command("cat testfile"), testtext);
+    std::cout << "Testing read_text_from_command with size limit\n";
+    OIIO_CHECK_EQUAL(my_read_text_from_command("cat testfile", 7), "test\nfo");
 
     std::cout << "Testing read_bytes:\n";
     char buf[3];

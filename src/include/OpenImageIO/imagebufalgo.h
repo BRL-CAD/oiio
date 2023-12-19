@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 // clang-format off
@@ -679,6 +679,9 @@ bool OIIO_API resize (ImageBuf &dst, const ImageBuf &src, Filter2D *filter,
 /// For "deep" images, this function returns copies the closest source pixel
 /// needed, rather than attempting to interpolate deep pixels (regardless of
 /// the value of `interpolate`).
+///
+/// @see ImageBufAlgo::resize()
+
 ImageBuf OIIO_API resample (const ImageBuf &src, bool interpolate = true,
                         ROI roi={}, int nthreads=0);
 /// Write to an existing image `dst` (allocating if it is uninitialized).
@@ -790,6 +793,27 @@ bool OIIO_API warp (ImageBuf &dst, const ImageBuf &src, M33fParam M,
                     const Filter2D *filter, bool recompute_roi = false,
                     ImageBuf::WrapMode wrap = ImageBuf::WrapDefault,
                     ROI roi = {}, int nthreads=0);
+
+#ifdef OIIO_INTERNAL  /* experimental -- not part of public API yet */
+ImageBuf OIIO_API warp (const ImageBuf &src, M33fParam M,
+                        string_view filtername,
+                        float filterwidth, bool recompute_roi,
+                        ImageBuf::WrapMode wrap, bool edgeclamp,
+                        ROI roi={}, int nthreads=0);
+ImageBuf OIIO_API warp (const ImageBuf &src, M33fParam M,
+                        const Filter2D *filter, bool recompute_roi,
+                        ImageBuf::WrapMode wrap, bool edgeclamp,
+                        ROI roi = {}, int nthreads=0);
+bool OIIO_API warp (ImageBuf &dst, const ImageBuf &src, M33fParam M,
+                    string_view filtername,
+                    float filterwidth, bool recompute_roi,
+                    ImageBuf::WrapMode wrap, bool edgeclamp,
+                    ROI roi={}, int nthreads=0);
+bool OIIO_API warp (ImageBuf &dst, const ImageBuf &src, M33fParam M,
+                    const Filter2D *filter, bool recompute_roi,
+                    ImageBuf::WrapMode wrap, bool edgeclamp,
+                    ROI roi = {}, int nthreads=0);
+#endif  // OIIO_INTERNAL
 /// @}
 
 
@@ -1003,6 +1027,38 @@ ImageBuf OIIO_API pow (const ImageBuf &A, cspan<float> B,
 /// Write to an existing image `dst` (allocating if it is uninitialized).
 bool OIIO_API pow (ImageBuf &dst, const ImageBuf &A, cspan<float> B,
                    ROI roi={}, int nthreads=0);
+
+/// Normalize a 3D vector texture (i.e., divide each pixel by its length).
+/// This function assumes a 3-channel image that represents a 3-vector, or a
+/// 4-channel image that represents a 3-vector plus an alpha value. If an
+/// alpha channel is present, its value is merely copied, and is not part of
+/// the normalization computation. If the destination has no alpha channel but
+/// the sources do, the alpha channel will be dropped.
+///
+/// `inCenter` and `outCenter` define the pixel value that corresponds to a
+/// 0.0 vector value for input and output, respectively.  `scale` defines the
+/// scale factor to apply to the normalized vectors.
+///
+/// Thus, if the input image encodes vector components into [0,1] range pixel
+/// values so that a pixel value 0.5 indicates a 0-length vector, then you
+/// should use `inCenter=0.5`, whereas if they are already using the full
+/// range (0.0 is encoded as 0.0), then you want `inCenter=0.0`. Similarly, if
+/// you want the output normalized vectors to be in the range [0,1], use
+/// `outCenter=0.5` and `scale=0.5`, but if you want them to be in the range
+/// [-1,1], use `outCenter=0.0` and `scale=1.0` (this probably will only work
+/// if you intend to write the results in `float` or `half` format).
+///
+/// Expressed another way, the computation is conceptually:
+///
+///     out = outCenter + scale * (in - inCenter) / length(in - inCenter)
+/// 
+bool OIIO_API normalize(ImageBuf& dst, const ImageBuf& A, float inCenter=0.0f,
+                        float outCenter=0.0f, float scale=1.0f,
+                        ROI roi={}, int nthreads=0);
+
+ImageBuf OIIO_API normalize(const ImageBuf& A, float inCenter=0.0f,
+                            float outCenter=0.0, float scale=1.0f, 
+                            ROI roi={}, int nthreads=0);
 
 
 /// Converts a multi-channel image into a one-channel image via a weighted
@@ -1827,7 +1883,7 @@ bool OIIO_API erode (ImageBuf &dst, const ImageBuf &src,
 ImageBuf OIIO_API colorconvert (const ImageBuf &src,
                       string_view fromspace, string_view tospace, bool unpremult=true,
                       string_view context_key="", string_view context_value="",
-                      ColorConfig *colorconfig=nullptr,
+                      const ColorConfig* colorconfig = nullptr,
                       ROI roi={}, int nthreads=0);
 
 /// Transform using a ColorProcessor, returning an ImageBuf result.
@@ -1838,7 +1894,7 @@ ImageBuf OIIO_API colorconvert (const ImageBuf &src,
 bool OIIO_API colorconvert (ImageBuf &dst, const ImageBuf &src,
                   string_view fromspace, string_view tospace, bool unpremult=true,
                   string_view context_key="", string_view context_value="",
-                  ColorConfig *colorconfig=nullptr,
+                  const ColorConfig* colorconfig = nullptr,
                   ROI roi={}, int nthreads=0);
 
 /// Transform using a ColorProcessor, storing reults into an existing ImageBuf.
@@ -1928,14 +1984,14 @@ ImageBuf OIIO_API ociolook (const ImageBuf &src, string_view looks,
                             string_view fromspace, string_view tospace,
                             bool unpremult=true, bool inverse=false,
                             string_view context_key="", string_view context_value="",
-                            ColorConfig *colorconfig=nullptr,
+                            const ColorConfig* colorconfig = nullptr,
                             ROI roi={}, int nthreads=0);
 /// Write to an existing image `dst` (allocating if it is uninitialized).
 bool OIIO_API ociolook (ImageBuf &dst, const ImageBuf &src, string_view looks,
                         string_view fromspace, string_view tospace,
                         bool unpremult=true, bool inverse=false,
                         string_view context_key="", string_view context_value="",
-                        ColorConfig *colorconfig=nullptr,
+                        const ColorConfig* colorconfig = nullptr,
                         ROI roi={}, int nthreads=0);
 
 
@@ -1983,18 +2039,37 @@ bool OIIO_API ociolook (ImageBuf &dst, const ImageBuf &src, string_view looks,
 ImageBuf OIIO_API ociodisplay (const ImageBuf &src,
                                string_view display, string_view view,
                                string_view fromspace="", string_view looks="",
-                               bool unpremult=true,
+                               bool unpremult=true, bool inverse=false,
                                string_view context_key="", string_view context_value="",
-                               ColorConfig *colorconfig=nullptr,
+                               const ColorConfig* colorconfig = nullptr,
                                ROI roi={}, int nthreads=0);
 /// Write to an existing image `dst` (allocating if it is uninitialized).
 bool OIIO_API ociodisplay (ImageBuf &dst, const ImageBuf &src,
                            string_view display, string_view view,
                            string_view fromspace="", string_view looks="",
-                           bool unpremult=true,
+                           bool unpremult=true, bool inverse=false,
                            string_view context_key="", string_view context_value="",
-                           ColorConfig *colorconfig=nullptr,
+                           const ColorConfig* colorconfig = nullptr,
                            ROI roi={}, int nthreads=0);
+
+#ifndef OIIO_DOXYGEN
+// OIIO_DEPRECATED("prefer the kind that takes an `inverse` parameter (2.5)")
+ImageBuf OIIO_API ociodisplay (const ImageBuf &src,
+                               string_view display, string_view view,
+                               string_view fromspace, string_view looks,
+                               bool unpremult,
+                               string_view context_key, string_view context_value="",
+                               const ColorConfig* colorconfig = nullptr,
+                               ROI roi={}, int nthreads=0);
+// OIIO_DEPRECATED("prefer the kind that takes an `inverse` parameter (2.5)")
+bool OIIO_API ociodisplay (ImageBuf &dst, const ImageBuf &src,
+                           string_view display, string_view view,
+                           string_view fromspace, string_view looks,
+                           bool unpremult,
+                           string_view context_key, string_view context_value="",
+                           const ColorConfig* colorconfig = nullptr,
+                           ROI roi={}, int nthreads=0);
+#endif
 
 
 /// Return the pixels of `src` within the ROI, applying an OpenColorIO
@@ -2023,13 +2098,13 @@ bool OIIO_API ociodisplay (ImageBuf &dst, const ImageBuf &src,
 ImageBuf OIIO_API ociofiletransform (const ImageBuf &src,
                                      string_view name,
                                      bool unpremult=true, bool inverse=false,
-                                     ColorConfig *colorconfig=nullptr,
+                                     const ColorConfig* colorconfig = nullptr,
                                      ROI roi={}, int nthreads=0);
 /// Write to an existing image `dst` (allocating if it is uninitialized).
 bool OIIO_API ociofiletransform (ImageBuf &dst, const ImageBuf &src,
                                  string_view name,
                                  bool unpremult=true, bool inverse=false,
-                                 ColorConfig *colorconfig=nullptr,
+                                 const ColorConfig* colorconfig = nullptr,
                                  ROI roi={}, int nthreads=0);
 
 

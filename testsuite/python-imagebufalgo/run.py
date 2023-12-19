@@ -2,9 +2,10 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 refdirlist = [
+    refdir,
     OIIO_TESTSUITE_ROOT + "/oiiotool/ref/",
     OIIO_TESTSUITE_ROOT + "/oiiotool-color/ref/",
     OIIO_TESTSUITE_ROOT + "/oiiotool-copy/ref/",
@@ -14,7 +15,6 @@ refdirlist = [
     OIIO_TESTSUITE_ROOT + "/oiiotool-pattern/ref/",
     OIIO_TESTSUITE_ROOT + "/oiiotool-text/ref/",
     OIIO_TESTSUITE_ROOT + "/oiiotool-xform/ref/",
-    refdir
 ]
 
 # Run the script
@@ -50,6 +50,9 @@ outputs = ["black.tif", "filled.tif", "checker.tif",
            "contrast-sigmoid5.tif",
            "saturate-0.tif", "saturate-2.tif",
            "resize.tif", "resample.tif", "fit.tif",
+           "norm.exr", "normoffset.exr", "normalize.exr", "normalize_scale.exr",
+           "normalize_offsetin.exr", "normalize_offsetscaleout.exr",
+           "normalize_offsetscale.exr",
            "bsplinekernel.exr", "bspline-blur.tif", "tahoe-median.tif",
            "dilate.tif", "erode.tif",
            "unsharp.tif", "unsharp-median.tif", "tahoe-laplacian.tif",

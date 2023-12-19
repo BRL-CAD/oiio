@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cstdio>
@@ -20,9 +20,11 @@
 
 #include <OpenImageIO/argparse.h>
 #include <OpenImageIO/benchmark.h>
+#include <OpenImageIO/color.h>
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagebufalgo.h>
 #include <OpenImageIO/imagebufalgo_util.h>
+#include <OpenImageIO/imagecache.h>
 #include <OpenImageIO/imageio.h>
 #include <OpenImageIO/timer.h>
 #include <OpenImageIO/unittest.h>
@@ -1107,7 +1109,51 @@ test_opencv()
     auto comp = ImageBufAlgo::compare(src, dst, 0.0f, 0.0f);
     OIIO_CHECK_EQUAL(comp.error, false);
     OIIO_CHECK_EQUAL(comp.maxerror, 0.0f);
+
+    // Regression test: reading from ImageBuf-backed image to OpenCV
+    auto loaded_image = OIIO::ImageBuf("../../testsuite/common/tahoe-tiny.tif",
+                                       0, 0, ImageCache::create());
+    OIIO_CHECK_ASSERT(loaded_image.initialized());
+    if (!loaded_image.initialized()) {
+        std::cout << loaded_image.geterror() << 'n';
+        return;
+    }
+    auto cv_image = cv::Mat {};
+    try {
+        bool ok = OIIO::ImageBufAlgo::to_OpenCV(cv_image, loaded_image, {}, 1);
+        OIIO_CHECK_ASSERT(ok);
+        if (!ok) {
+            std::cout << "Error when converting: " << OIIO::geterror() << '\n';
+            return;
+        }
+    } catch (const std::exception& e) {
+        OIIO_CHECK_ASSERT(0);
+        std::cout << "Error when converting: " << e.what() << '\n';
+        return;
+    }
 #endif
+}
+
+
+
+void
+test_color_management()
+{
+    ColorConfig config;
+
+    // Test the IBA::colorconvert version that works on a color at a time
+    {
+        auto processor = config.createColorProcessor("lin_srgb", "srgb");
+        float rgb[3]   = { 0.5f, 0.5f, 0.5f };
+        ImageBufAlgo::colorconvert(rgb, processor.get(), false);
+        OIIO_CHECK_EQUAL_THRESH(rgb[1], 0.735356983052449f, 1.0e-5);
+    }
+    {
+        auto processor = config.createColorProcessor("lin_srgb", "srgb");
+        float rgb[4]   = { 0.5f, 0.5f, 0.5f, 1.0f };
+        ImageBufAlgo::colorconvert(rgb, processor.get(), true);
+        OIIO_CHECK_EQUAL_THRESH(rgb[1], 0.735356983052449f, 1.0e-5);
+    }
 }
 
 
@@ -1168,6 +1214,7 @@ main(int argc, char** argv)
     test_IBAprep();
     test_validate_st_warp_checks();
     test_opencv();
+    test_color_management();
     test_yee();
 
     benchmark_parallel_image(64, iterations * 64);

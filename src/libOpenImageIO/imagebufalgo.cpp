@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cmath>
 #include <memory>
@@ -254,7 +254,9 @@ ImageBufAlgo::IBAprep(ROI& roi, ImageBuf* dst, const ImageBuf* A,
             }
         }
 
-        dst->reset(spec);
+        dst->reset(spec, (prepflags & IBAprep_FILL_ZERO_ALLOC)
+                             ? InitializePixels::Yes
+                             : InitializePixels::No);
 
         // If we just allocated more channels than the caller will write,
         // clear the extra channels.

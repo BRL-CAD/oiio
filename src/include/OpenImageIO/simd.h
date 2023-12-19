@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 /// @file  simd.h
 ///
@@ -25,6 +25,7 @@
 /// Additional web resources:
 ///   http://www.codersnotes.com/notes/maths-lib-2016/
 ///   https://www.agner.org/optimize/
+///   https://www.corsix.org/content/converting-fp32-to-fp16
 
 // clang-format off
 
@@ -44,6 +45,11 @@
 #include <OpenImageIO/vecparam.h>
 
 #include <OpenImageIO/detail/fmt.h>
+
+// Without SSE, we need to fall back on Imath for matrix44 invert
+#if !OIIO_SIMD_SSE
+#   include <OpenImageIO/Imath.h>
+#endif
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -292,7 +298,11 @@ class vbool16;
 class vint16;
 class vfloat16;
 
+#if OIIO_DISABLE_DEPRECATED < OIIO_MAKE_VERSION(1,9,0) && !defined(OIIO_INTERNAL)
 // Deprecated names -- remove these in 1.9
+// These are removed from visibility for the OIIO codebase itself, or for any
+// downstream project that defines OIIO_DISABLE_DEPRECATED to exclude
+// declarations deprecated as of version 1.9 or later.
 typedef vbool4 mask4;    // old name
 typedef vbool4 bool4;
 typedef vbool8 bool8;
@@ -301,6 +311,7 @@ typedef vint8 int8;
 typedef vfloat3 float3;
 typedef vfloat4 float4;
 typedef vfloat8 float8;
+#endif
 
 } // namespace simd
 
@@ -8530,6 +8541,8 @@ OIIO_FORCEINLINE matrix44 matrix44::inverse() const {
 OIIO_FORCEINLINE matrix44 matrix44::inverse() const {
     return matrix44 (((Imath::M44f*)this)->inverse());
 }
+#else
+#error "Don't know how to compute matrix44::inverse()"
 #endif
 
 

@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cmath>
@@ -26,8 +26,6 @@
 #include <OpenImageIO/timer.h>
 #include <OpenImageIO/ustring.h>
 
-#include "../libtexture/imagecache_pvt.h"
-
 using namespace OIIO;
 
 using OIIO::_1;
@@ -47,16 +45,18 @@ static float width       = 1;
 static float widthramp   = 0;
 static float anisoaspect = 1.0;  // anisotropic aspect ratio
 static std::string wrapmodes("periodic");
-static int anisomax           = TextureOpt().anisotropic;
-static int iters              = 1;
-static int autotile           = 0;
-static bool automip           = false;
-static bool dedup             = true;
-static bool test_construction = false;
-static bool test_gettexels    = false;
-static bool test_getimagespec = false;
-static bool filtertest        = false;
-static TextureSystem* texsys  = NULL;
+static std::string texcolorspace;
+static int texcolortransform_id = 0;
+static int anisomax             = TextureOpt().anisotropic;
+static int iters                = 1;
+static int autotile             = 0;
+static bool automip             = false;
+static bool dedup               = true;
+static bool test_construction   = false;
+static bool test_gettexels      = false;
+static bool test_getimagespec   = false;
+static bool filtertest          = false;
+static TextureSystem* texsys    = NULL;
 static std::string searchpath;
 static bool batch         = false;
 static bool nowarp        = false;
@@ -170,6 +170,8 @@ getargs(int argc, const char* argv[])
       .help("Set fill value for missing channels");
     ap.arg("--wrap %s:MODE", &wrapmodes)
       .help("Set wrap mode (default, black, clamp, periodic, mirror, overscan)");
+    ap.arg("--texcolorspace %s:NAME", &texcolorspace)
+      .help("Set texture presumed color space");
     ap.arg("--anisoaspect %f:ASPECT", &anisoaspect)
       .help("Set anisotropic ellipse aspect ratio for threadtimes tests (default: 2.0)");
     ap.arg("--anisomax %d:MAX", &anisomax)
@@ -303,6 +305,7 @@ initialize_opt(TextureOpt& opt)
         opt.subimage = subimage;
     else if (!subimagename.empty())
         opt.subimagename = ustring(subimagename);
+    opt.colortransformid = texcolortransform_id;
 }
 
 
@@ -332,6 +335,7 @@ initialize_opt(TextureOptBatch& opt)
         opt.subimage = subimage;
     else if (!subimagename.empty())
         opt.subimagename = ustring(subimagename);
+    opt.colortransformid = texcolortransform_id;
 }
 
 
@@ -1384,119 +1388,6 @@ test_getimagespec_gettexels(ustring filename)
 
 
 
-#ifndef OIIO_CODE_COVERAGE
-static void
-test_hash()
-{
-    std::vector<size_t> fourbits(1 << 4, 0);
-    std::vector<size_t> eightbits(1 << 8, 0);
-    std::vector<size_t> sixteenbits(1 << 16, 0);
-    std::vector<size_t> highereightbits(1 << 8, 0);
-
-    const size_t iters = 1000000;
-    const int res      = 4 * 1024;  // Simulate tiles from a 4k image
-    const int tilesize = 64;
-    const int nfiles   = iters / ((res / tilesize) * (res / tilesize));
-    Strutil::print("Testing hashing with {} files of {}x{} with {}x{} tiles:",
-                   nfiles, res, res, tilesize, tilesize);
-
-    ImageCache* imagecache = ImageCache::create();
-
-    // Set up the ImageCacheFiles outside of the timing loop
-    using OIIO::pvt::ImageCacheFile;
-    using OIIO::pvt::ImageCacheFileRef;
-    using OIIO::pvt::ImageCacheImpl;
-    std::vector<ImageCacheFileRef> icf;
-    for (int f = 0; f < nfiles; ++f) {
-        ustring filename = ustring::fmtformat("{:06}.tif", f);
-        icf.push_back(
-            new ImageCacheFile(*(ImageCacheImpl*)imagecache, NULL, filename));
-    }
-
-    // First, just try to do raw timings of the hash
-    Timer timer;
-    size_t i = 0, hh = 0;
-    for (int f = 0; f < nfiles; ++f) {
-        for (int y = 0; y < res; y += tilesize) {
-            for (int x = 0; x < res; x += tilesize, ++i) {
-                OIIO::pvt::TileID id(*icf[f], 0, 0, x, y, 0, 0, 1);
-                size_t h = id.hash();
-                hh += h;
-            }
-        }
-    }
-    Strutil::print("hh = {}\n", hh);
-    double time = timer();
-    double rate = (i / 1.0e6) / time;
-    Strutil::print("Hashing rate:` {:3.2f} Mhashes/sec\n", rate);
-
-    // Now, check the quality of the hash by looking at the low 4, 8, and
-    // 16 bits and making sure that they divide into hash buckets fairly
-    // evenly.
-    i = 0;
-    for (int f = 0; f < nfiles; ++f) {
-        for (int y = 0; y < res; y += tilesize) {
-            for (int x = 0; x < res; x += tilesize, ++i) {
-                OIIO::pvt::TileID id(*icf[f], 0, 0, x, y, 0, 0, 1);
-                size_t h = id.hash();
-                ++fourbits[h & 0xf];
-                ++eightbits[h & 0xff];
-                ++highereightbits[(h >> 24) & 0xff];
-                ++sixteenbits[h & 0xffff];
-                // if (i < 16) Strutil::print({:x}\n", h);
-            }
-        }
-    }
-
-    size_t min, max;
-    min = std::numeric_limits<size_t>::max();
-    max = 0;
-    for (int i = 0; i < 16; ++i) {
-        if (fourbits[i] < min)
-            min = fourbits[i];
-        if (fourbits[i] > max)
-            max = fourbits[i];
-    }
-    Strutil::print("4-bit hash buckets range from {} to {}\n", min, max);
-
-    min = std::numeric_limits<size_t>::max();
-    max = 0;
-    for (int i = 0; i < 256; ++i) {
-        if (eightbits[i] < min)
-            min = eightbits[i];
-        if (eightbits[i] > max)
-            max = eightbits[i];
-    }
-    Strutil::print("8-bit hash buckets range from {} to {}\n", min, max);
-
-    min = std::numeric_limits<size_t>::max();
-    max = 0;
-    for (int i = 0; i < 256; ++i) {
-        if (highereightbits[i] < min)
-            min = highereightbits[i];
-        if (highereightbits[i] > max)
-            max = highereightbits[i];
-    }
-    Strutil::print("higher 8-bit hash buckets range from {} to {}\n", min, max);
-
-    min = std::numeric_limits<size_t>::max();
-    max = 0;
-    for (int i = 0; i < (1 << 16); ++i) {
-        if (sixteenbits[i] < min)
-            min = sixteenbits[i];
-        if (sixteenbits[i] > max)
-            max = sixteenbits[i];
-    }
-    Strutil::print("16-bit hash buckets range from {} to {}\n", min, max);
-
-    Strutil::print("\n");
-
-    ImageCache::destroy(imagecache);
-}
-#endif
-
-
-
 static const char* workload_names[] = {
     /*0*/ "None",
     /*1*/ "Everybody accesses the same spot in one file (handles)",
@@ -1919,6 +1810,11 @@ main(int argc, const char* argv[])
     texsys->attribute("gray_to_rgb", gray_to_rgb);
     texsys->attribute("flip_t", flip_t);
     texsys->attribute("stochastic", stochastic);
+    texcolortransform_id
+        = std::max(0, texsys->get_colortransform_id(ustring(texcolorspace),
+                                                    ustring("scene_linear")));
+    if (texcolortransform_id > 0)
+        print("Treating texture as if it is in colorspace {}\n", texcolorspace);
 
     if (test_construction) {
         Timer t;
@@ -1977,7 +1873,7 @@ main(int argc, const char* argv[])
 
 #ifndef OIIO_CODE_COVERAGE
     if (testhash) {
-        test_hash();
+        TextureSystem::unit_test_hash();
     }
 #endif
 
@@ -2139,6 +2035,6 @@ main(int argc, const char* argv[])
         std::string err;
         Filesystem::remove(f, err);
     }
-
+    shutdown();
     return 0;
 }

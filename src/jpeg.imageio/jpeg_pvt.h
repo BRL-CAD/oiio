@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -62,10 +62,8 @@ public:
     {
         return (feature == "exif" || feature == "iptc" || feature == "ioproxy");
     }
-    bool valid_file(const std::string& filename) const override
-    {
-        return valid_file(filename, nullptr);
-    }
+    bool valid_file(Filesystem::IOProxy* ioproxy) const override;
+
     bool open(const std::string& name, ImageSpec& spec) override;
     bool open(const std::string& name, ImageSpec& spec,
               const ImageSpec& config) override;
@@ -118,8 +116,6 @@ private:
     void jpeg_decode_iptc(const unsigned char* buf);
 
     bool read_icc_profile(j_decompress_ptr cinfo, ImageSpec& spec);
-
-    bool valid_file(const std::string& filename, Filesystem::IOProxy* io) const;
 
     void close_file() { init(); }
 

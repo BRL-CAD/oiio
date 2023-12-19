@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 /*
   A few bits here are based upon code from NVIDIA that was also released
@@ -789,8 +789,7 @@ OIIO_FORCEINLINE OIIO_HOSTDEVICE OUT_TYPE bit_cast (const IN_TYPE& in) {
 
 #if defined(__x86_64__) && !defined(__CUDA_ARCH__) && \
     (defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER) \
-     || OIIO_CLANG_VERSION >= 100000 || OIIO_APPLE_CLANG_VERSION >= 130000 \
-     || OIIO_GCC_VERSION >= 90300)
+     || OIIO_CLANG_VERSION >= 100000 || OIIO_APPLE_CLANG_VERSION >= 130000)
 // On x86/x86_64 for certain compilers we can use Intel CPU intrinsics for
 // some common bitcast cases that might be even more understandable to the
 // compiler and generate better code without its getting confused about the
@@ -1230,6 +1229,7 @@ convert_type (const S &src)
 /// shifted fully to the right.
 template<unsigned int FROM_BITS, unsigned int TO_BITS>
 inline OIIO_HOSTDEVICE unsigned int bit_range_convert(unsigned int in) {
+    static_assert(FROM_BITS > 0, "FROM_BITS cannot be 0");
     unsigned int out = 0;
     int shift = TO_BITS - FROM_BITS;
     for (; shift > 0; shift -= FROM_BITS)
@@ -1245,10 +1245,12 @@ inline OIIO_HOSTDEVICE unsigned int
 bit_range_convert(unsigned int in, unsigned int FROM_BITS, unsigned int TO_BITS)
 {
     unsigned int out = 0;
-    int shift = TO_BITS - FROM_BITS;
-    for (; shift > 0; shift -= FROM_BITS)
-        out |= in << shift;
-    out |= in >> -shift;
+    if (FROM_BITS) {
+        int shift = TO_BITS - FROM_BITS;
+        for (; shift > 0; shift -= FROM_BITS)
+            out |= in << shift;
+        out |= in >> -shift;
+    }
     return out;
 }
 

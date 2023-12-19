@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1003,6 +1003,10 @@ public:
     ///       Does this format reader support retrieving a reduced
     ///       resolution copy of the image via the `thumbnail()` method?
     ///
+    ///  - `"noimage"` :
+    ///        Does this format allow 0x0 sized images, i.e. an image file
+    ///        with metadata only and no pixels?
+    ///
     /// This list of queries may be extended in future releases. Since this
     /// can be done simply by recognizing new query strings, and does not
     /// require any new API entry points, addition of support for new
@@ -1025,10 +1029,23 @@ public:
     ///         `true` upon success, or `false` upon failure.
     virtual bool valid_file (const std::string& filename) const;
 
-    /// Check valid vile using a UTF-16 encoded wstring filename.
+    /// Check valid file using a UTF-16 encoded wstring filename.
     bool valid_file (const std::wstring& filename) const {
         return valid_file(Strutil::utf16_to_utf8(filename));
     }
+
+    /// Return true if the `ioproxy` represents a file of the type for this
+    /// ImageInput.  The implementation will try to determine this as
+    /// efficiently as possible, in most cases much less expensively than
+    /// doing a full `open()`.  Note that there can be false positives: a
+    /// file can appear to be of the right type (i.e., `valid_file()`
+    /// returning `true`) but still fail a subsequent call to `open()`, such
+    /// as if the contents of the file are truncated, nonsensical, or
+    /// otherwise corrupted.
+    ///
+    /// @returns
+    ///         `true` upon success, or `false` upon failure.
+    virtual bool valid_file (Filesystem::IOProxy* ioproxy) const;
 
     /// Opens the file with given name and seek to the first subimage in the
     /// file.  Various file attributes are put in `newspec` and a copy
@@ -1805,6 +1822,53 @@ protected:
     /// Helper: retrieve the current position of the proxy, akin to ftell.
     int64_t iotell() const;
 
+    /// Helper: convenience boilerplate for several checks and operations that
+    /// every implementation of ImageInput::open() will need to do. Failure is
+    /// presumed to indicate a file that is corrupt (or perhaps maliciously
+    /// crafted) and no further reading should be attempted.
+    ///
+    /// @param spec
+    ///     The ImageSpec that we are validating.
+    ///
+    /// @param range
+    ///     An ROI that describes the allowable pixel coordinates and channel
+    ///     indices as half-open intervals.  For example, the default value
+    ///     `{0, 65535, 0, 65535, 0, 1, 0, 4}` means that pixel coordinates
+    ///     must be non-negative and the width and height be representable by
+    ///     a uint16 value, up to 4 channels are allowed, and volumes are not
+    ///     permitted (z coordinate may only be 0). File formats that can
+    ///     handle larger resolutions, or volumes, or >4 channels must
+    ///     override these limits!
+    ///
+    /// @param flags
+    ///     A bitfield flag (bits defined by `enum OpenChecks`) that can
+    ///     indicate additional checks to perform, or checks that should be
+    ///     skipped.
+    ///
+    /// @returns
+    ///     Return `true` if the spec is valid and passes all checks,
+    ///     otherwise return `false` and make appropriate calls to
+    ///     this->errorfmt() to record the errors.
+    ///
+    /// Checks performed include:
+    ///
+    /// * Whether the resolution and channel count are within the range
+    ///   implied by `range`.
+    /// * Whether the channel count is within the `"limit:channels"` OIIO
+    ///   attribute.
+    /// * The total uncompressed pixel data size is expected to be within the
+    ///   `"limit:imagesize_MB"` OIIO attribute.
+    ///
+    bool check_open (const ImageSpec &spec,
+                     ROI range = {0, 65535, 0, 65535, 0, 1, 0, 4},
+                     uint64_t flags = 0);
+
+    /// Bit field definitions for the `flags` argument to `check_open()`.
+    enum class OpenChecks : uint64_t {
+        Defaults = 0,
+        // Reserved for future use
+    };
+
     /// @}
 
 private:
@@ -2018,6 +2082,10 @@ public:
     ///        `"thumbnail"` but not `"thumbnail_after_write"` means that any
     ///        thumbnail must be supplied immediately after `open()`, prior
     ///        to any of the `write_*()` calls.)
+    ///
+    ///  - `"noimage"` :
+    ///        Does this format allow 0x0 sized images, i.e. an image file
+    ///        with metadata only and no pixels?
     ///
     /// This list of queries may be extended in future releases. Since this
     /// can be done simply by recognizing new query strings, and does not
@@ -2490,6 +2558,102 @@ public:
     typedef ImageOutput* (*Creator)();
 
 protected:
+    /// @{
+    /// @name Helper functions for ImageOutput implementations.
+    ///
+    /// This set of utility functions are not meant to be called by user code.
+    /// They are protected methods of ImageOutput, and are used internally by
+    /// the ImageOutput implementation to help it properly implement support
+    /// of IOProxy.
+    ///
+
+    /// Helper: convenience boilerplate for several checks and operations that
+    /// every implementation of ImageOutput::open() will need to do.
+    ///
+    /// 1. Check if the open `mode` is one allowed by `supports("multiimage")`
+    ///    and `supports("mipmap")`.
+    /// 2. Copy the passed spec to the internal m_spec.
+    /// 3. Do all possible validity checks based on `supports()` (for example,
+    ///    is the request to write volumetric data but the format writer
+    ///    doesn't support it).
+    ///
+    /// Returns true if ok, false if the open request can't be satisfied (and
+    /// makes appropriate calls to this->errorfmt() to record the errors).
+    ///
+    /// Having a central helper method for this is beneficial:
+    ///
+    /// * Less repeated code in the many open() implementations, which also
+    ///   means less opportunity for bugs.
+    /// * Ensures that all image writers perform the full set of possible
+    ///   validity checks.
+    /// * Ensures that error messages are consistent across all writers and
+    ///   can be improved in a single location.
+    /// * Better code coverage for testing, because the error handling that is
+    ///   done centrally means we don't need to separately test every possible
+    ///   error condition in every writer.
+    ///
+    /// @param mode
+    ///     The mode in which the file is to be opened (`Create`,
+    ///     `AppendSubimage`, or `AppendMIPLevel`).
+    ///
+    /// @param spec
+    ///     The ImageSpec that we are validating.
+    ///
+    /// @param range
+    ///     An ROI that describes the allowable pixel coordinates and channel
+    ///     indices as half-open intervals.  For example, the default value
+    ///     `{0, 65535, 0, 65535, 0, 1, 0, 4}` means that pixel coordinates
+    ///     must be non-negative and the width and height be representable by
+    ///     a uint16 value, up to 4 channels are allowed, and volumes are not
+    ///     permitted (z coordinate may only be 0). File formats that can
+    ///     handle larger resolutions, or volumes, or >4 channels must
+    ///     override these limits!
+    ///
+    /// @param flags
+    ///     A bitfield flag (bits defined by `enum OpenChecks`) that can
+    ///     indicate additional checks to perform, or checks that should be
+    ///     skipped.
+    ///
+    /// @returns
+    ///     Return `true` if the spec is valid and passes all checks,
+    ///     otherwise return `false` and make appropriate calls to
+    ///     this->errorfmt() to record the errors.
+    ///
+    /// Checks performed include:
+    /// 
+    /// * Whether the open `mode` is one allowed by `supports("multiimage")`
+    ///   and `supports("mipmap")`.
+    /// * Whether the resolution and channel count is within the range
+    ///   implied by `range`. If `spec.depth < 1`, it will be set to 1.
+    /// * Whether the request for volumes or deep images can be accommodated
+    ///   by the format (according to its `supports()` queries).
+    /// * If per-channel data types are supplied (and not all the same), but
+    ///   but the file format does not not `supports("channelformats")`. If
+    ///   `spec.channelformats` is used but all formats are equal, then
+    ///   the `channelformats` vector will be cleared and only `spec.format`
+    ///   will be used.
+    /// * If any of the "full" size fields are negative or zero, they will be
+    ///   set to the corresponding pixel data size fields.
+    /// * Whether the pixel origin offset (`spec.x`, `spec.y`, `spec.z`) is
+    ///   allowed to be non-zero (according to `supports("origin")` or
+    ///   negative (`supports("negativeorigin")`) -- if it is not allowed,
+    ///   it is an error if flags includes `Strict`, otherwise it will simply
+    ///   be adjusted to 0.
+    /// * Whether the `extra_attribs` contains a request to use an IOProxy,
+    ///   but the format writer does not report `supports("ioproxy")`.
+    bool check_open(OpenMode mode, const ImageSpec &spec,
+                    ROI range = {0, 65535, 0, 65535, 0, 1, 0, 4},
+                    uint64_t flags = 0);
+
+    /// Bit field definitions for the `flags` argument to `check_open()`.
+    enum class OpenChecks : uint64_t {
+        Defaults = 0,
+        Disallow1Channel = 1,
+        Disallow2Channel = 2,
+        Disallow1or2Channel = Disallow1Channel | Disallow2Channel,
+        Strict = (uint64_t(1) << 32)
+    };
+
     /// Helper routines used by write_* implementations: convert data (in
     /// the given format and stride) to the "native" format of the file
     /// (described by the 'spec' member variable), in contiguous order. This
@@ -2545,13 +2709,15 @@ protected:
                                     void *image_buffer,
                                     TypeDesc buf_format = TypeDesc::UNKNOWN);
 
+    /// @}
+
     /// @{
-    /// @name IOProxy aids for ImageInput implementations.
+    /// @name IOProxy aids for ImageOutput implementations.
     ///
     /// This set of utility functions are not meant to be called by user code.
-    /// They are protected methods of ImageInput, and are used internally by
-    /// the ImageInput implementation to help it properly implement support of
-    /// IOProxy.
+    /// They are protected methods of ImageOutput, and are used internally by
+    /// the ImageOutput implementation to help it properly implement support
+    /// of IOProxy.
     ///
 
     /// Get the IOProxy being used underneath.
@@ -2590,8 +2756,8 @@ protected:
     /// Helper: retrieve the current position of the proxy, akin to ftell.
     int64_t iotell() const;
 
-    // Write a formatted string to the output proxy. Return true on success,
-    // false upon failure and issue an error message.
+    /// Write a formatted string to the output proxy. Return true on success,
+    /// false upon failure and issue an error message.
     template<typename Str, typename... Args>
     inline bool iowritefmt(const Str& fmt, Args&&... args)
     {
@@ -2618,6 +2784,13 @@ private:
 
 
 // Utility functions
+
+/// `OIIO::shutdown` prepares OpenImageIO for shutdown. Before exiting an 
+/// application that utilizes OpenImageIO the `OIIO::shutdown` function must be 
+/// called, which will perform shutdown of any running thread-pools. Failing 
+/// to call `OIIO::shutdown` could lead to a sporadic dead-lock during 
+/// application shutdown on certain platforms such as Windows. 
+OIIO_API void shutdown ();
 
 /// Returns a numeric value for the version of OpenImageIO, 10000 for each
 /// major version, 100 for each minor version, 1 for each patch.  For
@@ -2789,7 +2962,7 @@ OIIO_API std::string geterror(bool clear = true);
 ///    you should raise this limit. Setting the limit to 0 means having no
 ///    limit.
 ///
-/// - `int log_times`
+/// - `int log_times` (0)
 ///
 ///    When the `"log_times"` attribute is nonzero, `ImageBufAlgo` functions
 ///    are instrumented to record the number of times they were called and
@@ -2806,6 +2979,40 @@ OIIO_API std::string geterror(bool clear = true);
 ///    calls, and the locking and recording of the data structure that holds
 ///    the log information. When the `log_times` attribute is disabled,
 ///    there is no additional performance cost.
+///
+/// - `oiio:print_uncaught_errors` (1)
+///
+///   If nonzero, upon program exit, any error messages that would have been
+///   retrieved by a call to `OIIO::geterror()`, but never were, will be
+///   printed to stdout. While this may seem chaotic, we are presuming that
+///   any well-written library or application will proactively check error
+///   codes and retrieve errors, so this will never print anything upon exit.
+///   But for less sophisticated applications (or users), this is very useful
+///   for forcing display of error messages so that users can see relevant
+///   errors even if they never check them explicitly, thus self-diagnose
+///   their troubles before asking the project dev deam for help. Advanced
+///   users who for some reason desire to neither retrieve errors themselves
+///   nor have them printed in this manner can disable the behavior by setting
+///   this attribute to 0.
+///
+/// - `imagebuf:print_uncaught_errors` (1)
+///
+///   If nonzero, an `ImageBuf` upon destruction will print any error messages
+///   that were never retrieved by its `geterror()` method. While this may
+///   seem chaotic, we are presuming that any well-written library or
+///   application will proactively check error codes and retrieve errors, so
+///   will never print anything upon destruction. But for less sophisticated
+///   applications (or users), this is very useful for forcing display of
+///   error messages so that users can see relevant errors even if they never
+///   check them explicitly, thus self-diagnose their troubles before asking
+///   the project dev deam for help. Advanced users who for some reason desire
+///   to neither retrieve errors themselves nor have them printed in this
+///   manner can disable the behavior by setting this attribute to 0.
+///
+/// - `imagebuf:use_imagecache` (0)
+///
+///   If nonzero, an `ImageBuf` that references a file but is not given an
+///   ImageCache will read the image through the default ImageCache.
 ///
 OIIO_API bool attribute(string_view name, TypeDesc type, const void* val);
 
@@ -2863,8 +3070,41 @@ inline bool attribute (string_view name, string_view val) {
 ///
 ///        "tiff:LIBTIFF 4.0.4;gif:gif_lib 4.2.3;openexr:OpenEXR 2.2.0"
 ///
-/// - string "timing_report"
-///         A string containing the report of all the log_times.
+/// - `string font_list`
+/// - `string font_file_list`
+/// - `string font_dir_list`
+///
+///   A semicolon-separated list of, respectively, all the fonts that
+///   OpenImageIO can find, all the font files that OpenImageIO can find (with
+///   full paths), and all the directories that OpenImageIO will search for
+///   fonts.  (Added in OpenImageIO 2.5)
+///
+/// - int64_t IB_local_mem_current
+/// - int64_t IB_local_mem_peak
+///
+///   Current and peak size (in bytes) of how much memory was consumed by
+///   ImageBufs that owned their own allcoated local pixel buffers. (Added in
+///   OpenImageIO 2.5.)
+///
+/// - float IB_total_open_time
+/// - float IB_total_image_read_time
+///
+///   Total amount of time (in seconds) that ImageBufs spent opening
+///   (including reading header information) and reading pixel data from files
+///   that they opened and read themselves (that is, excluding I/O from IBs
+///   that were backed by ImageCach.  (Added in OpenImageIO 2.5.)
+///
+/// - `string opencolorio_version`
+///
+///   Returns the version (such as "2.2.0") of OpenColorIO that is used by
+///   OpenImageiO, or "0.0.0" if no OpenColorIO support has been enabled.
+///   (Added in OpenImageIO 2.4.6)
+///
+/// - `int opencv_version`
+///
+///   Returns the encoded version (such as 40701 for 4.7.1) of the OpenCV that
+///   is used by OpenImageIO, or 0 if no OpenCV support has been enabled.
+///   (Added in OpenImageIO 2.5.2)
 ///
 /// - `string opencolorio_version`
 ///

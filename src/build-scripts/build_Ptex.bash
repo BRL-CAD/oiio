@@ -4,7 +4,7 @@
 #
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Exit the whole script if any command fails.
 set -ex
@@ -31,12 +31,10 @@ cd ${PTEX_SRC_DIR}
 echo "git checkout ${PTEX_VERSION} --force"
 git checkout ${PTEX_VERSION} --force
 
-mkdir -p ${PTEX_BUILD_DIR}
-cd ${PTEX_BUILD_DIR}
-time cmake -DCMAKE_BUILD_TYPE=Release \
+time cmake -S . -B ${PTEX_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release \
            -DCMAKE_INSTALL_PREFIX=${PTEX_INSTALL_DIR} \
-           ${PTEX_CONFIG_OPTS} ..
-time cmake --build . --config Release --target install
+           ${PTEX_CONFIG_OPTS}
+time cmake --build ${PTEX_BUILD_DIR} --config Release --target install
 
 # ls -R ${PTEX_INSTALL_DIR}
 popd

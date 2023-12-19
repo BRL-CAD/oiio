@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 /// @file timer.h
@@ -21,7 +21,6 @@
 #include <OpenImageIO/strutil.h>
 
 #ifdef _WIN32
-//# include <windows.h>  // Already done by platform.h
 #elif defined(__APPLE__)
 #    include <mach/mach_time.h>
 #else
@@ -64,27 +63,32 @@ class OIIO_UTIL_API Timer {
 public:
     typedef int64_t ticks_t;
     enum StartNowVal { DontStartNow, StartNow };
-    enum PrintDtrVal { DontPrintDtr, PrintDtr };
+    enum PrintDtrVal { DontPrintDtr, PrintDtr, PrintCtrDtr };
 
     /// Constructor -- reset at zero, and start timing unless optional
     /// 'startnow' argument is false.
-    Timer(StartNowVal startnow = StartNow, PrintDtrVal printdtr = DontPrintDtr,
+    Timer(StartNowVal startnow, PrintDtrVal printdtr = DontPrintDtr,
           const char* name = NULL)
         : m_ticking(false)
-        , m_printdtr(printdtr == PrintDtr)
+        , m_printdtr(printdtr == PrintDtr || printdtr == PrintCtrDtr)
         , m_starttime(0)
         , m_elapsed_ticks(0)
         , m_name(name)
     {
-        if (startnow == StartNow)
+        if (startnow == StartNow) {
             start();
+            if (printdtr == PrintCtrDtr) {
+                Strutil::print("Starting timer {}\n", (m_name ? m_name : ""),
+                               seconds(ticks()));
+            }
+        }
     }
 
     /// Constructor -- reset at zero, and start timing unless optional
     /// 'startnow' argument is false.
-    Timer(bool startnow)
+    Timer(bool startnow = true)
         : m_ticking(false)
-        , m_printdtr(DontPrintDtr)
+        , m_printdtr(false)
         , m_starttime(0)
         , m_elapsed_ticks(0)
         , m_name(NULL)
@@ -96,9 +100,9 @@ public:
     /// Destructor.
     ~Timer()
     {
-        if (m_printdtr == PrintDtr)
-            Strutil::printf("Timer %s: %gs\n", (m_name ? m_name : ""),
-                            seconds(ticks()));
+        if (m_printdtr)
+            Strutil::print("Timer {}: {:g}s\n", (m_name ? m_name : ""),
+                           seconds(ticks()));
     }
 
     /// Start (or restart) ticking, if we are not currently.
@@ -199,23 +203,23 @@ private:
     /// Platform-dependent grab of current time, expressed as ticks_t.
     ///
     ticks_t now(void) const
-    {
 #ifdef _WIN32
-        LARGE_INTEGER n;
-        QueryPerformanceCounter(&n);  // From MSDN web site
-        return n.QuadPart;
-#elif defined(__APPLE__)
+        ;  // a non-inline function on Windows
+#else
+    {
+#    if defined(__APPLE__)
         return mach_absolute_time();
-#elif OIIO_TIMER_LINUX_USE_clock_gettime
+#    elif OIIO_TIMER_LINUX_USE_clock_gettime
         struct timespec t;
         clock_gettime(CLOCK_MONOTONIC, &t);
         return int64_t(t.tv_sec) * int64_t(1000000000) + t.tv_nsec;
-#else
+#    else
         struct timeval t;
         gettimeofday(&t, NULL);
         return int64_t(t.tv_sec) * int64_t(1000000) + t.tv_usec;
-#endif
+#    endif
     }
+#endif
 
     /// Difference between two times, expressed in (platform-dependent)
     /// ticks.

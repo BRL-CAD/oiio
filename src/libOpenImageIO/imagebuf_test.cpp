@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <OpenImageIO/benchmark.h>
@@ -501,6 +501,101 @@ test_write_over()
 
 
 
+static void
+test_uncaught_error()
+{
+    ImageBuf buf;
+    buf.error("Boo!");
+    // buf exists scope and is destroyed without anybody retrieving the error.
+}
+
+
+
+void
+test_mutable_iterator_with_imagecache()
+{
+    // Make 4x4 1-channel float source image, value 0.5, write it.
+    char srcfilename[] = "tmp_f1.exr";
+    ImageSpec fsize1(4, 4, 1, TypeFloat);
+    ImageBuf src(fsize1);
+    ImageBufAlgo::fill(src, 0.5f);
+    src.write(srcfilename);
+
+    ImageBuf buf(srcfilename, 0, 0, ImageCache::create());
+    // Using the cache, it should look tiled
+    OIIO_CHECK_EQUAL(buf.spec().tile_width, buf.spec().width);
+
+    // Make a mutable iterator, even though it's an image file reference.
+    // Merely establishing the iterator ought to read the file and make the
+    // buffer writeable.
+    ImageBuf::Iterator<float> it(buf);
+    OIIO_CHECK_EQUAL(buf.spec().tile_width, 0);  // should look untiled
+    OIIO_CHECK_ASSERT(buf.localpixels());        // should look local
+    for (; !it.done(); ++it)
+        it[0] = 1.0f;
+
+    ImageCache::create()->invalidate(ustring(srcfilename));
+    Filesystem::remove(srcfilename);
+}
+
+
+
+void
+time_iterators()
+{
+    print("Timing iterator operations:\n");
+    const int rez = 4096, nchans = 4;
+    ImageSpec spec(rez, rez, nchans, TypeFloat);
+    ImageBuf img(spec);
+    ImageBufAlgo::fill(img, { 0.25f, 0.5f, 0.75f, 1.0f });
+
+    Benchmarker bench;
+    double sum = 0.0f;
+    bench("Read traversal with ConstIterator", [&]() {
+        sum = 0.0f;
+        for (ImageBuf::ConstIterator<float> it(img); !it.done(); ++it) {
+            for (int c = 0; c < nchans; ++c)
+                sum += it[c];
+        }
+    });
+    OIIO_CHECK_EQUAL(sum, 2.5 * rez * rez);
+    bench("Read traversal with Iterator", [&]() {
+        sum = 0.0f;
+        for (ImageBuf::Iterator<float> it(img); !it.done(); ++it) {
+            for (int c = 0; c < nchans; ++c)
+                sum += it[c];
+        }
+    });
+    OIIO_CHECK_EQUAL(sum, 2.5 * rez * rez);
+    bench("Read traversal with pointer", [&]() {
+        sum             = 0.0f;
+        const float* it = (const float*)img.localpixels();
+        for (int y = 0; y < rez; ++y)
+            for (int x = 0; x < rez; ++x, it += 4) {
+                for (int c = 0; c < nchans; ++c)
+                    sum += it[c];
+            }
+    });
+    OIIO_CHECK_EQUAL(sum, 2.5 * rez * rez);
+    bench("Write traversal with Iterator", [&]() {
+        ImageBuf::Iterator<float> it(img);
+        for (ImageBuf::Iterator<float> it(img); !it.done(); ++it) {
+            for (int c = 0; c < nchans; ++c)
+                it[c] = 0.5f;
+        }
+    });
+    bench("Write traversal with pointer", [&]() {
+        float* it = (float*)img.localpixels();
+        for (int y = 0; y < rez; ++y)
+            for (int x = 0; x < rez; ++x, it += 4) {
+                for (int c = 0; c < nchans; ++c)
+                    it[c] = 0.5f;
+            }
+    });
+}
+
+
+
 int
 main(int /*argc*/, char* /*argv*/[])
 {
@@ -523,6 +618,8 @@ main(int /*argc*/, char* /*argv*/[])
                                                        "periodic");
     iterator_wrap_test<ImageBuf::ConstIterator<float>>(ImageBuf::WrapMirror,
                                                        "mirror");
+    test_mutable_iterator_with_imagecache();
+    time_iterators();
 
     ImageBuf_test_appbuffer();
     ImageBuf_test_appbuffer_strided();
@@ -533,6 +630,8 @@ main(int /*argc*/, char* /*argv*/[])
     time_get_pixels();
 
     test_write_over();
+
+    test_uncaught_error();
 
     Filesystem::remove("A_imagebuf_test.tif");
     return unit_test_failures;

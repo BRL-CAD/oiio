@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 ###########################################################################
 #
@@ -15,13 +15,12 @@
 ###########################################################################
 # Print some basic status about the system and compiler
 #
-if (VERBOSE)
-    message (STATUS "CMAKE_SYSTEM_NAME      = ${CMAKE_SYSTEM_NAME}")
-    message (STATUS "CMAKE_SYSTEM_VERSION   = ${CMAKE_SYSTEM_VERSION}")
-    message (STATUS "CMAKE_SYSTEM_PROCESSOR = ${CMAKE_SYSTEM_PROCESSOR}")
-endif ()
-message (STATUS "CMAKE_CXX_COMPILER     = ${CMAKE_CXX_COMPILER}")
-message (STATUS "CMAKE_CXX_COMPILER_ID  = ${CMAKE_CXX_COMPILER_ID}")
+message (VERBOSE "CMAKE_SYSTEM_NAME      = ${CMAKE_SYSTEM_NAME}")
+message (VERBOSE "CMAKE_SYSTEM_VERSION   = ${CMAKE_SYSTEM_VERSION}")
+message (VERBOSE "CMAKE_SYSTEM_PROCESSOR = ${CMAKE_SYSTEM_PROCESSOR}")
+message (STATUS  "CMAKE_CXX_COMPILER     = ${CMAKE_CXX_COMPILER}")
+message (STATUS  "CMAKE_CXX_COMPILER_ID  = ${CMAKE_CXX_COMPILER_ID}")
+message (VERBOSE "CMAKE_CXX_COMPILE_FEATURES = ${CMAKE_CXX_COMPILE_FEATURES}")
 
 
 ###########################################################################
@@ -44,9 +43,7 @@ if (CMAKE_COMPILER_IS_GNUCC)
     execute_process (COMMAND ${CMAKE_CXX_COMPILER} -dumpversion
                      OUTPUT_VARIABLE GCC_VERSION
                      OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if (VERBOSE)
-        message (STATUS "Using gcc ${GCC_VERSION} as the compiler")
-    endif ()
+    message (VERBOSE "Using gcc ${GCC_VERSION} as the compiler")
 else ()
     set (GCC_VERSION 0)
 endif ()
@@ -63,26 +60,18 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER MATCHES "[Cc]lan
         set (CMAKE_CXX_COMPILER_ID "AppleClang")
         set (CMAKE_COMPILER_IS_APPLECLANG 1)
         string (REGEX REPLACE ".* version ([0-9]+\\.[0-9]+).*" "\\1" APPLECLANG_VERSION_STRING ${clang_full_version_string})
-        if (VERBOSE)
-            message (STATUS "The compiler is Clang: ${CMAKE_CXX_COMPILER_ID} version ${APPLECLANG_VERSION_STRING}")
-        endif ()
+        message (VERBOSE "The compiler is Clang: ${CMAKE_CXX_COMPILER_ID} version ${APPLECLANG_VERSION_STRING}")
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM")
         set (CMAKE_COMPILER_IS_INTELCLANG 1)
         string (REGEX MATCH "[0-9]+(\\.[0-9]+)+" INTELCLANG_VERSION_STRING ${clang_full_version_string})
-        if (VERBOSE)
-            message (STATUS "The compiler is Intel Clang: ${CMAKE_CXX_COMPILER_ID} version ${INTELCLANG_VERSION_STRING}")
-        endif ()
+        message (VERBOSE "The compiler is Intel Clang: ${CMAKE_CXX_COMPILER_ID} version ${INTELCLANG_VERSION_STRING}")
     else ()
         string (REGEX REPLACE ".* version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
-        if (VERBOSE)
-            message (STATUS "The compiler is Clang: ${CMAKE_CXX_COMPILER_ID} version ${CLANG_VERSION_STRING}")
-        endif ()
+        message (VERBOSE "The compiler is Clang: ${CMAKE_CXX_COMPILER_ID} version ${CLANG_VERSION_STRING}")
     endif ()
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Intel")
     set (CMAKE_COMPILER_IS_INTEL 1)
-    if (VERBOSE)
-        message (STATUS "Using Intel as the compiler")
-    endif ()
+    message (VERBOSE "Using Intel as the compiler")
 endif ()
 
 
@@ -121,11 +110,11 @@ endif ()
 # give more fine-grained control for hiding symbols, because sometimes
 # dependent libraries may not be well behaved and need extra hiding.
 #
-set (CXX_VISIBILITY_PRESET "hidden" CACHE STRING "Symbol visibility (hidden or default")
+set (CMAKE_CXX_VISIBILITY_PRESET "hidden" CACHE STRING "Symbol visibility (hidden or default")
 option (VISIBILITY_INLINES_HIDDEN "Hide symbol visibility of inline functions" ON)
 set (VISIBILITY_MAP_FILE "${PROJECT_SOURCE_DIR}/src/build-scripts/hidesymbols.map" CACHE FILEPATH "Visibility map file")
-set (C_VISIBILITY_PRESET ${CXX_VISIBILITY_PRESET})
-if (${CXX_VISIBILITY_PRESET} STREQUAL "hidden" AND VISIBILITY_MAP_FILE AND
+set (CMAKE_C_VISIBILITY_PRESET ${CMAKE_CXX_VISIBILITY_PRESET})
+if (${CMAKE_CXX_VISIBILITY_PRESET} STREQUAL "hidden" AND VISIBILITY_MAP_FILE AND
     (CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_CLANG) AND
     (CMAKE_SYSTEM_NAME MATCHES "Linux|kFreeBSD" OR CMAKE_SYSTEM_NAME STREQUAL "GNU"))
     # Linux/FreeBSD/Hurd: also hide all the symbols of dependent libraries
@@ -191,6 +180,7 @@ endif ()
 if (MSVC)
     # Microsoft specific options
     add_compile_options (/W1)
+    add_compile_options (/MP)
     add_definitions (-D_CRT_SECURE_NO_DEPRECATE)
     add_definitions (-D_CRT_SECURE_NO_WARNINGS)
     add_definitions (-D_CRT_NONSTDC_NO_WARNINGS)
@@ -314,9 +304,7 @@ if (NOT USE_SIMD STREQUAL "")
     else ()
         string (REPLACE "," ";" SIMD_FEATURE_LIST ${USE_SIMD})
         foreach (feature ${SIMD_FEATURE_LIST})
-            if (VERBOSE)
-                message (STATUS "SIMD feature: ${feature}")
-            endif ()
+            message (VERBOSE "SIMD feature: ${feature}")
             if (MSVC OR CMAKE_COMPILER_IS_INTEL)
                 set (SIMD_COMPILE_FLAGS ${SIMD_COMPILE_FLAGS} "/arch:${feature}")
             else ()
@@ -371,9 +359,7 @@ if (NOT MSVC AND NOT APPLE AND NOT ANDROID)
             message (FATAL_ERROR "Compiler needs libatomic, but not found")
         endif ()
     else ()
-        if (VERBOSE)
-            message (STATUS "Compiler supports std::atomic, no libatomic necessary")
-        endif ()
+        message (VERBOSE "Compiler supports std::atomic, no libatomic necessary")
     endif ()
 endif ()
 
@@ -476,10 +462,8 @@ if (CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES "clang-tidy"
                  DOC "Path to clang-tidy executable")
     message (STATUS "CLANG_TIDY_EXE ${CLANG_TIDY_EXE}")
-    if (CLANG_TIDY_EXE AND NOT ${CMAKE_VERSION} VERSION_LESS 3.6)
-        set (CMAKE_CXX_CLANG_TIDY
-             "${CLANG_TIDY_EXE}"
-             )
+    if (CLANG_TIDY_EXE)
+        set (CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
         if (CLANG_TIDY_ARGS)
             list (APPEND CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_ARGS})
         endif ()
@@ -573,9 +557,7 @@ else ()
     set (SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
          CACHE STRING "Set the SO version for dynamic libraries")
 endif ()
-if (VERBOSE)
-    message(STATUS "Setting SOVERSION to: ${SOVERSION}")
-endif ()
+message(VERBOSE "Setting SOVERSION to: ${SOVERSION}")
 
 
 ###########################################################################
@@ -637,11 +619,13 @@ else ()
     # add the automatically determined parts of the RPATH that
     # point to directories outside the build tree to the install RPATH
     set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-    if (VERBOSE)
-        message (STATUS "CMAKE_INSTALL_RPATH = ${CMAKE_INSTALL_RPATH}")
-    endif ()
+    message (VERBOSE "CMAKE_INSTALL_RPATH = ${CMAKE_INSTALL_RPATH}")
 endif ()
 
+
+###########################################################################
+# Generate compile_commands.json for use by editors and tools.
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
 ###########################################################################

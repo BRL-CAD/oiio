@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cmath>
@@ -43,7 +43,7 @@ getargs(int argc, char* argv[])
     ArgParse ap;
     ap.intro("idiff -- compare two images\n"
              OIIO_INTRO_STRING)
-      .usage("idiff [options] image1 image2")
+      .usage("idiff [options] <image1> <image2 | directory>")
       .add_version(OIIO_VERSION_STRING)
       .print_defaults(true);
 
@@ -169,6 +169,24 @@ print_subimage(ImageBuf& img0, int subimage, int miplevel)
 }
 
 
+// Append the filename from "first" when "second" is a directory.
+// "second" is an output variable and modified in-place.
+inline void
+add_filename_to_directory(const std::string& first, std::string& second)
+{
+    if (Filesystem::is_directory(second)) {
+        char last_byte = second.at(second.size() - 1);
+        if (last_byte != '/' && last_byte != '\\') {
+#if defined(_MSC_VER)
+            second += '\\';
+#else
+            second += '/';
+#endif
+        }
+        second += Filesystem::filename(first);
+    }
+}
+
 
 int
 main(int argc, char* argv[])
@@ -181,7 +199,9 @@ main(int argc, char* argv[])
     ArgParse ap = getargs(argc, argv);
 
     std::vector<std::string> filenames = ap["filename"].as_vec<std::string>();
-    if (filenames.size() != 2) {
+    if (filenames.size() == 2) {
+        add_filename_to_directory(filenames[0], filenames[1]);
+    } else {
         print(stderr, "idiff: Must have two input filenames.\n");
         print(stderr, "> {}\n", Strutil::join(filenames, ", "));
         ap.usage();
@@ -281,7 +301,7 @@ main(int argc, char* argv[])
 
             int yee_failures = 0;
             if (perceptual && !img0.deep()) {
-                ImageBufAlgo::CompareResults cr;
+                cr           = {};
                 yee_failures = ImageBufAlgo::compare_Yee(img0, img1, cr);
             }
 
@@ -399,5 +419,6 @@ main(int argc, char* argv[])
 
     imagecache->invalidate_all(true);
     ImageCache::destroy(imagecache);
+    shutdown();
     return ret;
 }

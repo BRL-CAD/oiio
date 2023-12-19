@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 ###########################################################################
 # Find external dependencies
@@ -99,8 +99,8 @@ checked_find_package (TIFF REQUIRED
 
 # IlmBase & OpenEXR
 checked_find_package (OpenEXR REQUIRED
-                      VERSION_MIN 2.3
-                      RECOMMEND_MIN 2.4
+                      VERSION_MIN 2.4
+                      RECOMMEND_MIN 3.1
                       PRINT IMATH_INCLUDES OPENEXR_INCLUDES)
 # Force Imath includes to be before everything else to ensure that we have
 # the right Imath/OpenEXR version, not some older version in the system
@@ -123,29 +123,24 @@ set (OPENIMAGEIO_IMATH_TARGETS
             # For OpenEXR >= 2.4/2.5 with reliable exported targets
             $<TARGET_NAME_IF_EXISTS:IlmBase::Imath>
             $<TARGET_NAME_IF_EXISTS:IlmBase::Half>
-            $<TARGET_NAME_IF_EXISTS:IlmBase::Iex>
-            # For OpenEXR <= 2.3:
-            ${ILMBASE_LIBRARIES} )
+            $<TARGET_NAME_IF_EXISTS:IlmBase::Iex> )
 set (OPENIMAGEIO_OPENEXR_TARGETS
             # For OpenEXR/Imath 3.x:
             $<TARGET_NAME_IF_EXISTS:OpenEXR::OpenEXR>
             # For OpenEXR >= 2.4/2.5 with reliable exported targets
             $<TARGET_NAME_IF_EXISTS:OpenEXR::IlmImf>
             $<TARGET_NAME_IF_EXISTS:IlmBase::IlmThread>
-            $<TARGET_NAME_IF_EXISTS:IlmBase::Iex>
-            # For OpenEXR <= 2.3:
-            ${OPENEXR_LIBRARIES} )
+            $<TARGET_NAME_IF_EXISTS:IlmBase::Iex> )
 set (OPENIMAGEIO_IMATH_DEPENDENCY_VISIBILITY "PUBLIC" CACHE STRING
      "Should we expose Imath library dependency as PUBLIC or PRIVATE")
 set (OPENIMAGEIO_CONFIG_DO_NOT_FIND_IMATH OFF CACHE BOOL
      "Exclude find_dependency(Imath) from the exported OpenImageIOConfig.cmake")
 
-# JPEG -- prefer Turbo-JPEG to regular libjpeg
-checked_find_package (JPEGTurbo
-                      DEFINITIONS -DUSE_JPEG_TURBO=1
-                      PRINT       JPEG_INCLUDES JPEG_INCLUDE_DIRS
-                                  JPEG_LIBRARIES JPEG_VERSION)
-if (NOT JPEG_FOUND) # Try to find the non-turbo version
+# JPEG -- prefer JPEG-Turbo to regular libjpeg
+checked_find_package (libjpeg-turbo
+                      VERSION_MIN 2.1
+                      DEFINITIONS -DUSE_JPEG_TURBO=1)
+if (NOT TARGET libjpeg-turbo::jpeg) # Try to find the non-turbo version
     checked_find_package (JPEG REQUIRED)
 endif ()
 
@@ -183,9 +178,16 @@ checked_find_package (OpenColorIO
                       DEFINITIONS  -DUSE_OCIO=1 -DUSE_OPENCOLORIO=1
                       # PREFER_CONFIG
                       )
-if (NOT OpenColorIO_FOUND)
+if (OpenColorIO_FOUND)
+    option (OIIO_DISABLE_BUILTIN_OCIO_CONFIGS
+           "For deveoper debugging/testing ONLY! Disable OCIO 2.2 builtin configs." OFF)
+    if (OIIO_DISABLE_BUILTIN_OCIO_CONFIGS OR "$ENV{OIIO_DISABLE_BUILTIN_OCIO_CONFIGS}")
+        add_compile_definitions(OIIO_DISABLE_BUILTIN_OCIO_CONFIGS)
+    endif ()
+else ()
     set (OpenColorIO_FOUND 0)
 endif ()
+
 checked_find_package (OpenCV 3.0
                    DEFINITIONS  -DUSE_OPENCV=1)
 
@@ -212,8 +214,7 @@ if (APPLE AND LIBHEIF_VERSION VERSION_GREATER_EQUAL 1.10 AND LIBHEIF_VERSION VER
 endif ()
 
 checked_find_package (LibRaw
-                      RECOMMEND_MIN 0.18
-                      RECOMMEND_MIN_REASON "for ACES support and better camera metadata"
+                      VERSION_MIN 0.18
                       PRINT LibRaw_r_LIBRARIES)
 if (LibRaw_FOUND AND LibRaw_VERSION VERSION_LESS 0.20 AND CMAKE_CXX_STANDARD VERSION_GREATER_EQUAL 17)
     message (STATUS "${ColorYellow}WARNING When building for C++17, LibRaw should be 0.20 or higher (found ${LibRaw_VERSION}). You may get errors, depending on the compiler.${ColorReset}")
@@ -234,6 +235,10 @@ checked_find_package (OpenVDB
                       VERSION_MIN 5.0
                       DEPS         TBB
                       DEFINITIONS  -DUSE_OPENVDB=1)
+if (OpenVDB_FOUND AND OpenVDB_VERSION VERSION_GREATER_EQUAL 10.1 AND CMAKE_CXX_STANDARD VERSION_LESS 17)
+    message (WARNING "${ColorYellow}OpenVDB >= 10.1 (we found ${OpenVDB_VERSION}) can only be used when we build with C++17 or higher. Disabling OpenVDB support.${ColorReset}")
+    set (OpeVDB_FOUND 0)
+endif ()
 
 checked_find_package (Ptex PREFER_CONFIG)
 if (NOT Ptex_FOUND OR NOT Ptex_VERSION)
@@ -315,7 +320,7 @@ endmacro()
 option (BUILD_FMT_FORCE "Force local download/build of fmt even if installed" OFF)
 option (BUILD_MISSING_FMT "Local download/build of fmt if not installed" ON)
 option (INTERNALIZE_FMT "Copy fmt headers into <install>/include/OpenImageIO/detail/fmt" ON)
-set (BUILD_FMT_VERSION "9.0.0" CACHE STRING "Preferred fmtlib/fmt version, when downloading/building our own")
+set (BUILD_FMT_VERSION "10.0.0" CACHE STRING "Preferred fmtlib/fmt version, when downloading/building our own")
 
 macro (find_or_download_fmt)
     # If we weren't told to force our own download/build of fmt, look
@@ -348,7 +353,8 @@ macro (find_or_download_fmt)
     else ()
         set (OIIO_USING_FMT_LOCAL FALSE)
     endif ()
-    checked_find_package (fmt REQUIRED)
+    checked_find_package (fmt REQUIRED
+                          VERSION_MIN 7.0)
 endmacro()
 
 find_or_download_fmt()

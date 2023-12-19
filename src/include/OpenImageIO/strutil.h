@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 // clang-format off
 
@@ -127,11 +127,7 @@ template<typename Str, typename... Args>
 OIIO_NODISCARD
 inline std::string format(const Str& fmt, Args&&... args)
 {
-#if FMT_VERSION >= 70000
     return ::fmt::vformat(fmt, ::fmt::make_format_args(args...));
-#else
-    return ::fmt::format(fmt, args...);
-#endif
 }
 } // namespace fmt
 
@@ -371,22 +367,42 @@ std::string OIIO_UTIL_API wordwrap (string_view src, int columns = 80,
 
 /// Our favorite "string" hash of a length of bytes. Currently, it is just
 /// a wrapper for an inlined, constexpr (if C++ >= 14), Cuda-safe farmhash.
+/// It returns a size_t, so will be a 64 bit hash on 64-bit platforms, but
+/// a 32 bit hash on 32-bit platforms.
 inline constexpr size_t
-strhash (size_t len, const char *s)
+strhash(size_t len, const char *s)
 {
     return OIIO::farmhash::inlined::Hash(s, len);
 }
 
 
+/// A guaranteed 64-bit string hash on all platforms.
+inline constexpr uint64_t
+strhash64(size_t len, const char *s)
+{
+    return OIIO::farmhash::inlined::Hash64(s, len);
+}
+
+
 /// Hash a string_view. This is OIIO's default favorite string hasher.
-/// Currently, it uses farmhash, is constexpr (for C++14), and works in
-/// Cuda. This is rigged, though, so that empty strings hash always hash to
-/// 0 (that isn't what a raw farmhash would give you, but it's a useful
-/// property, especially for trivial initialization).
+/// Currently, it uses farmhash, is constexpr (for C++14), and works in Cuda.
+/// This is rigged, though, so that empty strings hash always hash to 0 (that
+/// isn't what a raw farmhash would give you, but it's a useful property,
+/// especially for trivial initialization). It returns a size_t, so will be a
+/// 64 bit hash on 64-bit platforms, but a 32 bit hash on 32-bit platforms.
 inline constexpr size_t
-strhash (string_view s)
+strhash(string_view s)
 {
     return s.length() ? strhash(s.length(), s.data()) : 0;
+}
+
+
+
+/// Hash a string_view, guaranteed 64 bits (even on 32 bit platforms).
+inline constexpr uint64_t
+strhash64(string_view s)
+{
+    return s.length() ? strhash64(s.length(), s.data()) : 0;
 }
 
 

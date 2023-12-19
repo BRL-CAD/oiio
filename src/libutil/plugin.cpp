@@ -1,13 +1,15 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cstdlib>
 #include <string>
 
 #include <OpenImageIO/platform.h>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#    include <windows.h>
+#else
 #    include <dlfcn.h>
 #endif
 

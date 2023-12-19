@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cmath>
 #include <cstdio>
@@ -40,8 +40,6 @@ public:
                     stride_t zstride) override;
 
 private:
-    std::string m_filename;  ///< Stash the filename
-    FILE* m_file;            ///< Open image handle
     std::vector<unsigned char> m_scratch;
     RLAHeader m_rla;                   ///< Wavefront RLA header
     std::vector<uint32_t> m_sot;       ///< Scanline offset table
@@ -52,7 +50,7 @@ private:
     // Initialize private members to pre-opened state
     void init(void)
     {
-        m_file = NULL;
+        ioproxy_clear();
         m_sot.clear();
     }
 
@@ -66,14 +64,6 @@ private:
     bool encode_channel(unsigned char* data, stride_t xstride,
                         TypeDesc chantype, int bits);
 
-    /// Helper - write, with error detection
-    bool fwrite(const void* buf, size_t itemsize, size_t nitems)
-    {
-        size_t n = ::fwrite(buf, itemsize, nitems, m_file);
-        if (n != nitems)
-            errorf("Write error: wrote %d records of %d", (int)n, (int)nitems);
-        return n == nitems;
-    }
 
     /// Helper: write buf[0..nitems-1], swap endianness if necessary
     template<typename T> bool write(const T* buf, size_t nitems = 1)
@@ -86,7 +76,7 @@ private:
             swap_endian(newbuf, nitems);
             buf = newbuf;
         }
-        return fwrite(buf, sizeof(T), nitems);
+        return iowrite(buf, sizeof(T), nitems);
     }
 };
 
@@ -137,6 +127,8 @@ RLAOutput::supports(string_view feature) const
         return true;
     if (feature == "channelformats")
         return true;
+    if (feature == "ioproxy")
+        return true;
     // Support nothing else nonstandard
     return false;
 }
@@ -147,45 +139,19 @@ bool
 RLAOutput::open(const std::string& name, const ImageSpec& userspec,
                 OpenMode mode)
 {
-    if (mode != Create) {
-        errorf("%s does not support subimages or MIP levels", format_name());
+    if (!check_open(mode, userspec, { 0, 65535, 0, 65535, 0, 1, 0, 256 }))
         return false;
-        // FIXME -- the RLA format supports subimages, but our writer
-        // doesn't.  I'm not sure if it's worth worrying about for an
-        // old format that is so rarely used.  We'll come back to it if
-        // anybody actually encounters a multi-subimage RLA in the wild.
-    }
+    // FIXME -- the RLA format supports subimages, but our writer doesn't.
+    // I'm not sure if it's worth worrying about for an old format that is so
+    // rarely used.  We'll come back to it if anybody actually encounters a
+    // multi-subimage RLA in the wild.
 
-    close();            // Close any already-opened file
-    m_spec = userspec;  // Stash the spec
     if (m_spec.format == TypeDesc::UNKNOWN)
         m_spec.format = TypeDesc::UINT8;  // Default to uint8 if unknown
 
-    m_file = Filesystem::fopen(name, "wb");
-    if (!m_file) {
-        errorf("Could not open \"%s\"", name);
+    ioproxy_retrieve_from_config(m_spec);
+    if (!ioproxy_use_or_open(name))
         return false;
-    }
-
-    // Check for things this format doesn't support
-    if (m_spec.width < 1 || m_spec.height < 1) {
-        errorf("Image resolution must be at least 1x1, you asked for %d x %d",
-               m_spec.width, m_spec.height);
-        return false;
-    }
-    if (m_spec.width > 65535 || m_spec.height > 65535) {
-        errorf(
-            "Image resolution %d x %d too large for RLA (maximum 65535x65535)",
-            m_spec.width, m_spec.height);
-        return false;
-    }
-
-    if (m_spec.depth < 1)
-        m_spec.depth = 1;
-    else if (m_spec.depth > 1) {
-        errorf("%s does not support volume images (depth > 1)", format_name());
-        return false;
-    }
 
     m_dither = (m_spec.format == TypeDesc::UINT8)
                    ? m_spec.get_int_attribute("oiio:dither", 0)
@@ -401,7 +367,7 @@ RLAOutput::set_chromaticity(const ParamValue* p, char* dst, size_t field_size,
 bool
 RLAOutput::close()
 {
-    if (!m_file) {  // already closed
+    if (!ioproxy_opened()) {  // already closed
         init();
         return true;
     }
@@ -417,10 +383,8 @@ RLAOutput::close()
 
     // Now that all scanlines have been output, return to write the
     // correct scanline offset table to file and close the stream.
-    fseek(m_file, sizeof(RLAHeader), SEEK_SET);
-    write(&m_sot[0], m_sot.size());
-    fclose(m_file);
-    m_file = NULL;
+    ioseek(sizeof(RLAHeader));
+    write(m_sot.data(), m_sot.size());
 
     init();  // re-initialize
     return ok;
@@ -527,7 +491,7 @@ RLAOutput::encode_channel(unsigned char* data, stride_t xstride,
     m_rle[1]      = size & 255;
 
     // And write the channel to the file
-    return write(&m_rle[0], m_rle.size());
+    return write(m_rle.data(), m_rle.size());
 }
 
 
@@ -548,7 +512,7 @@ RLAOutput::write_scanline(int y, int z, TypeDesc format, const void* data,
 
     // store the offset to the scanline.  We'll swap_endian if necessary
     // when we go to actually write it.
-    m_sot[m_spec.height - 1 - (y - m_spec.y)] = (uint32_t)ftell(m_file);
+    m_sot[m_spec.height - 1 - (y - m_spec.y)] = (uint32_t)iotell();
 
     size_t pixelsize = m_spec.pixel_bytes(true /*native*/);
     int offset       = 0;

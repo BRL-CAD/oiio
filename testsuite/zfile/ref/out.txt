@@ -13,3 +13,5 @@ out.zfile            :   64 x   64, 1 channel, float zfile
     Stats FiniteCount: 4096 
     Constant: No
     Monochrome: Yes
+Comparing "out.zfile" and "ref/out.zfile"
+PASS

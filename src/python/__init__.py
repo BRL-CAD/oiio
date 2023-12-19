@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
-# SPDX-License-Identifier: BSD-3-Clause
-# https://github.com/OpenImageIO/oiio
+# SPDX-License-Identifier: Apache-2.0
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 import os, sys, platform
 

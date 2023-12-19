@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cstdio>
 
@@ -62,18 +62,9 @@ TermOutput::supports(string_view feature) const
 bool
 TermOutput::open(const std::string& name, const ImageSpec& spec, OpenMode mode)
 {
-    if (mode != Create) {
-        errorfmt("{} does not support subimages or MIP levels", format_name());
+    if (!check_open(mode, spec, { 0, 255, 0, 255, 0, 1, 0, 4 },
+                    uint64_t(OpenChecks::Disallow1or2Channel)))
         return false;
-    }
-
-    if (spec.nchannels != 3 && spec.nchannels != 4) {
-        errorfmt("{} does not support {}-channel images\n", format_name(),
-                 m_spec.nchannels);
-        return false;
-    }
-
-    m_spec = spec;
 
     // Retrieve config hints giving special instructions
     m_method   = Strutil::lower(m_spec["term:method"].get());
@@ -137,7 +128,7 @@ bool
 TermOutput::output()
 {
     // Color convert in place to sRGB, or it won't look right
-    std::string cspace = m_buf.spec()["oiio:colorspace"].get();
+    std::string cspace = m_buf.spec()["oiio:ColorSpace"].get();
     ImageBufAlgo::colorconvert(m_buf, m_buf, cspace, "sRGB");
 
     string_view method(m_method);

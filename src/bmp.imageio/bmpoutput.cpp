@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cstdio>
 
@@ -81,21 +81,11 @@ BmpOutput::supports(string_view feature) const
 bool
 BmpOutput::open(const std::string& name, const ImageSpec& spec, OpenMode mode)
 {
-    if (mode != Create) {
-        errorfmt("{} does not support subimages or MIP levels", format_name());
+    if (!check_open(mode, spec, { 0, 65535, 0, 65535, 0, 1, 0, 4 },
+                    uint64_t(OpenChecks::Disallow2Channel)))
         return false;
-    }
 
-    // saving 'name' and 'spec' for later use
     m_filename = name;
-    m_spec     = spec;
-
-    if (m_spec.nchannels != 1 && m_spec.nchannels != 3
-        && m_spec.nchannels != 4) {
-        errorfmt("{} does not support {}-channel images\n", format_name(),
-                 m_spec.nchannels);
-        return false;
-    }
 
     if (m_spec.x || m_spec.y || m_spec.z) {
         errorfmt("{} does not support images with non-zero image origin offset",

@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <algorithm>
@@ -1302,6 +1302,8 @@ encode_exif(const ImageSpec& spec, std::vector<char>& blob,
     TIFFHeader head;
     head.tiff_magic   = (endianreq == endian::little) ? 0x4949 : 0x4d4d;
     head.tiff_version = 42;
+    if (endianreq != endian::native)
+        swap_endian(&head.tiff_version);
     // N.B. need to swap_endian head.tiff_diroff  below, once we know the sizes
     append(blob, head);
 

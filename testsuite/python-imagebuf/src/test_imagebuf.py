@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 from __future__ import print_function
@@ -137,6 +137,14 @@ def test_multiimage () :
         return
     out.close ()
 
+
+# Test the functionality of uninitialized ImageBufs
+def test_uninitialized () :
+    print ("Testing uninitialized bufs")
+    empty = oiio.ImageBuf()
+    print ("  empty nchannels:", empty.nchannels)
+
+
 # Print floating point tuple contents with slightly less than full precision
 # in order to mask LSB differences between platforms.
 def ftupstr(tup) :
@@ -183,8 +191,10 @@ try:
     b = oiio.ImageBuf ("../common/textures/grid.tx")
     b.init_spec ("../common/textures/grid.tx")
     b.read ()
-    print ("subimage:", b.subimage, " / ", b.nsubimages)
-    print ("miplevel:", b.miplevel, " / ", b.nmiplevels)
+    if b.nsubimages != 0:
+        print ("subimage:", b.subimage, " / ", b.nsubimages)
+    if b.nmiplevels != 0:
+        print ("miplevel:", b.miplevel, " / ", b.nmiplevels)
     print ("channels:", b.nchannels)
     print ("name:", b.name)
     print ("file_format_name:", b.file_format_name)
@@ -249,6 +259,7 @@ try:
     test_perchannel_formats ()
     test_deep ()
     test_multiimage ()
+    test_uninitialized ()
 
     print ("\nDone.")
 except Exception as detail:

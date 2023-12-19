@@ -1,10 +1,10 @@
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
-cmake_minimum_required (VERSION 3.12)
+cmake_minimum_required (VERSION 3.15)
 
-set (OpenImageIO_VERSION "2.4.15.0")
+set (OpenImageIO_VERSION "2.5.6.0")
 set (OpenImageIO_VERSION_OVERRIDE "" CACHE STRING
      "Version override (use with caution)!")
 mark_as_advanced (OpenImageIO_VERSION_OVERRIDE)
@@ -92,6 +92,11 @@ endif ()
 
 
 option (VERBOSE "Print lots of messages while compiling" OFF)
+if (VERBOSE)
+    set (CMAKE_MESSAGE_LOG_LEVEL "VERBOSE" CACHE STRING "CMake log level to display")
+else ()
+    set (CMAKE_MESSAGE_LOG_LEVEL "STATUS" CACHE STRING "CMake log level to display")
+endif ()
 option (${PROJ_NAME}_BUILD_TOOLS "Build the command-line tools" ON)
 option (${PROJ_NAME}_BUILD_TESTS "Build the unit tests" ON)
 set (OIIO_LIBNAME_SUFFIX "" CACHE STRING
@@ -138,6 +143,11 @@ if (${PROJ_NAME}_NAMESPACE_INCLUDE_PATCH)
     set (PROJ_NAMESPACE_V "${PROJ_NAMESPACE_V}_${PROJECT_VERSION_PATCH}")
 endif ()
 message(STATUS "Setting Namespace to: ${PROJ_NAMESPACE_V}")
+
+set (OIIO_SITE "" CACHE STRING "Site name for customization")
+if (OIIO_SITE)
+    add_definitions (-DOIIO_SITE_${OIIO_SITE})
+endif ()
 
 # Define OIIO_INTERNAL symbol only when building OIIO itself, will not be
 # defined for downstream projects using OIIO.
@@ -305,7 +315,7 @@ install (EXPORT OIIO_EXPORTED_TARGETS
         NAMESPACE ${PROJECT_NAME}::)
 
 
-if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
+if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND ${PROJ_NAME}_BUILD_TESTS)
     oiio_setup_test_data()
     oiio_add_all_tests()
 endif ()

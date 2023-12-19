@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 # Create some test images we need
@@ -126,9 +126,11 @@ command += oiiotool ("notfound.#.jpg -o alsonotfound.#.jpg")
 command += oiiotool ("copyA.#.jpg -o copyC.1-5#.jpg")
 
 # Test stats and metadata expression substitution
-command += oiiotool ("../common/tahoe-tiny.tif --echo \"\\nBrief: {TOP.METABRIEF}\"")
-command += oiiotool ("../common/tahoe-tiny.tif --echo \"\\nMeta: {TOP.META}\"")
-command += oiiotool ("../common/tahoe-tiny.tif --echo \"\\nStats:\\n{TOP.STATS}\\n\"")
+command += oiiotool ("../common/tahoe-tiny.tif"
+                     + " --echo \"\\nBrief: {TOP.METABRIEF}\""
+                     + " --echo \"\\nBrief native: {TOP.METANATIVEBRIEF}\""
+                     + " --echo \"\\nMeta native: {TOP.METANATIVE}\""
+                     + " --echo \"\\nStats:\\n{TOP.STATS}\\n\"")
 
 # Test IMG[]
 command += oiiotool ("../common/tahoe-tiny.tif ../common/tahoe-small.tif " +

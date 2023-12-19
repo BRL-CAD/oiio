@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 /////////////////////////////////////////////////////////////////////////
 // Tests related to ImageInput and ImageOutput
@@ -143,7 +143,7 @@ checked_read(ImageInput* in, string_view filename,
 
 
 
-// Helper for test_all_formats: write the pixels in buf to an in-memrory
+// Helper for test_all_formats: write the pixels in buf to an in-memory
 // IOProxy, make sure it matches byte for byte the file named by disk_filename.
 static bool
 test_write_proxy(string_view formatname, string_view extension,
@@ -196,6 +196,18 @@ test_write_proxy(string_view formatname, string_view extension,
         Strutil::print("Write proxy via ImageBuf didn't match write file\n");
         Strutil::print("Sizes outproxy {} vs readbuf {}\n",
                        outproxy.buffer().size(), readbuf.size());
+#if 0
+        for (size_t i = 0, e = std::min(outproxy.buffer().size(), readbuf.size());
+             i < e; ++i) {
+            Strutil::print(" {0:2d}: {1:02x} '{1:c}' vs {2:02x} '{2:c}'\n",
+                           i, outproxy.buffer()[i], readbuf[i]);
+            if (outproxy.buffer()[i] != readbuf[i]) {
+                Strutil::print("  Mismatch at byte {} outproxy {} vs readbuf {}\n",
+                               i, outproxy.buffer()[i], readbuf[i]);
+                break;
+            }
+        }
+#endif
     }
     OIIO_CHECK_ASSERT(outproxybuf.buffer() == readbuf
                       && "Write proxy via ImageBuf didn't match write file");

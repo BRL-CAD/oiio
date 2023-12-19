@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
-# SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# SPDX-License-Identifier: Apache-2.0
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 if (VERBOSE)
    message (STATUS "Create imagio_pvt.h from imageio_pvt.h.in")
@@ -101,6 +101,18 @@ if (EMBEDPLUGINS)
                       REGULAR_EXPRESSION "^.+/${plugin}\\.imageio/.+$"
                      )
     endforeach ()
+endif ()
+
+# Enable default use of OpenEXR core library for versions of the library
+# new enough to support DWA compression in exrcore.
+if (OPENEXR_VERSION VERSION_GREATER_EQUAL 3.1.10)
+    target_compile_definitions(OpenImageIO
+                               PRIVATE OIIO_OPENEXR_CORE_DEFAULT=1)
+    message (STATUS "OpenEXR core library will be used by default")
+else ()
+    target_compile_definitions(OpenImageIO
+                               PRIVATE OIIO_OPENEXR_CORE_DEFAULT=0)
+    message (STATUS "OpenEXR core library will not be used by default")
 endif ()
 
 # Source groups for libutil and libtexture
@@ -216,7 +228,7 @@ install_targets (OpenImageIO)
 
 # Testing
 
-if (OIIO_BUILD_TESTS)
+if (OIIO_BUILD_TESTS AND BUILD_TESTING)
 
     add_executable (color_test color_test.cpp)
     target_link_libraries (color_test PRIVATE OpenImageIO)
@@ -260,4 +272,4 @@ if (OIIO_BUILD_TESTS)
     set_target_properties (compute_test PROPERTIES FOLDER "Unit Tests")
     add_test (unit_compute ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/compute_test)
 
-endif (OIIO_BUILD_TESTS)
+endif ()

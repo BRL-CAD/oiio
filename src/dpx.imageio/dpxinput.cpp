@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cmath>
 #include <iomanip>
@@ -12,6 +12,7 @@
 // But that seems not to be actively maintained.
 #include "libdpx/DPX.h"
 #include "libdpx/DPXColorConverter.h"
+#include "libdpx/DPXHeader.h"
 
 #include <OpenImageIO/imageio.h>
 #include <OpenImageIO/strutil.h>
@@ -29,7 +30,7 @@ public:
     {
         return (feature == "ioproxy");
     }
-    bool valid_file(const std::string& filename) const override;
+    bool valid_file(Filesystem::IOProxy* ioproxy) const override;
     bool open(const std::string& name, ImageSpec& newspec) override;
     bool open(const std::string& name, ImageSpec& newspec,
               const ImageSpec& config) override;
@@ -107,21 +108,14 @@ OIIO_PLUGIN_EXPORTS_END
 
 
 bool
-DPXInput::valid_file(const std::string& filename) const
+DPXInput::valid_file(Filesystem::IOProxy* ioproxy) const
 {
-    Filesystem::IOProxy* io
-        = new Filesystem::IOFile(filename, Filesystem::IOProxy::Mode::Read);
-    std::unique_ptr<Filesystem::IOProxy> io_uptr(io);
-    if (!io || io->mode() != Filesystem::IOProxy::Mode::Read)
+    if (!ioproxy || ioproxy->mode() != Filesystem::IOProxy::Mode::Read)
         return false;
 
-    std::unique_ptr<InStream> stream_uptr(new InStream(io));
-    if (!stream_uptr)
-        return false;
-
-    dpx::Reader dpx;
-    dpx.SetInStream(stream_uptr.get());
-    return dpx.ReadHeader();  // IOFile is automatically closed when destructed
+    dpx::U32 magic {};
+    const size_t numRead = ioproxy->pread(&magic, sizeof(magic), 0);
+    return numRead == sizeof(magic) && dpx::Header::ValidMagicCookie(magic);
 }
 
 

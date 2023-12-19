@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #pragma once
@@ -15,6 +15,7 @@
 
 #include <OpenImageIO/argparse.h>
 #include <OpenImageIO/color.h>
+#include <OpenImageIO/errorhandler.h>
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagecache.h>
 #include <OpenImageIO/sysutil.h>
@@ -26,11 +27,12 @@
 OIIO_NAMESPACE_BEGIN
 namespace OiioTool {
 
-typedef int (*CallbackFunction)(int argc, const char* argv[]);
-
 class Oiiotool;
 class ImageRec;
 typedef std::shared_ptr<ImageRec> ImageRecRef;
+
+typedef void (*CallbackFunction)(Oiiotool& ot, cspan<const char*> argv);
+
 
 
 /// Policy hints for reading images
@@ -76,6 +78,7 @@ public:
     int autotile;
     int frame_padding;
     bool eval_enable;              // Enable evaluation of expressions
+    bool parallel_frames = false;  // Parallelize over frame iteration
     bool skip_bad_frames = false;  // Just skip a bad frame, don't exit
     bool nostderr        = false;  // If true, use stdout for errors
     bool noerrexit       = false;  // Don't exit on error
@@ -90,6 +93,7 @@ public:
     std::string input_channel_set;  // Optional input channel set
     ParamValueList uservars;        // User-defined variables (with --set)
     ArgParse ap;                    // Command-line argument parser
+    ErrorHandler eh;
 
     struct ControlRec {
         std::string command;  // control command: "if", "while", etc.
@@ -157,6 +161,9 @@ public:
     int input_bitspersample = 0;
     std::map<std::string, std::string> input_channelformats;
 
+    // stat_mutex guards when we are merging another ot's stats into this one
+    std::mutex m_stat_mutex;
+
     Oiiotool();
 
     void clear_options();
@@ -217,9 +224,7 @@ public:
     // If required_images are not yet on the stack, then postpone this
     // call by putting it on the 'pending' list and return true.
     // Otherwise (if enough images are on the stack), return false.
-    bool postpone_callback(int required_images, CallbackFunction func, int argc,
-                           const char* argv[]);
-    bool postpone_callback(int required_images, ArgParse::Action func,
+    bool postpone_callback(int required_images, CallbackFunction func,
                            cspan<const char*> argv);
 
     // Process any pending commands.
@@ -227,8 +232,6 @@ public:
 
     CallbackFunction pending_callback() const { return m_pending_callback; }
     const char* pending_callback_name() const { return m_pending_argv[0]; }
-    const ArgParse::Action& pending_action() const { return m_pending_action; }
-    const char* pending_action_name() const { return m_pending_argv[0]; }
 
     void push(const ImageRecRef& img)
     {
@@ -272,7 +275,8 @@ public:
     // S% (e.g. "50%") or just S (e.g., "1.2") will be accepted to scale the
     // existing width and height (rounding to the nearest whole number of
     // pixels.
-    bool adjust_geometry(string_view command, int& w, int& h, int& x, int& y,
+    template<typename T>
+    bool adjust_geometry(string_view command, T& w, T& h, T& x, T& y,
                          string_view geom, bool allow_scaling = false,
                          bool allow_size = true) const;
 
@@ -351,11 +355,12 @@ public:
         return opt;
     }
 
+    // Merge stats from another Oiiotool
+    void merge_stats(const Oiiotool& ot);
+
 private:
     CallbackFunction m_pending_callback;
-    ArgParse::Action m_pending_action;
-    int m_pending_argc;
-    const char* m_pending_argv[4];
+    std::vector<const char*> m_pending_argv;
 
     void express_error(const string_view expr, const string_view s,
                        string_view explanation);
@@ -662,7 +667,8 @@ enum DiffErrors {
 bool
 decode_channel_set(const ImageSpec& spec, string_view chanlist,
                    std::vector<std::string>& newchannelnames,
-                   std::vector<int>& channels, std::vector<float>& values);
+                   std::vector<int>& channels, std::vector<float>& values,
+                   ErrorHandler& eh);
 
 
 
@@ -768,10 +774,11 @@ public:
     // The constructor records the arguments (including running them
     // through expression substitution) and pops the input images off the
     // stack.
-    OiiotoolOp(Oiiotool& ot, string_view opname, int argc, const char* argv[],
-               int ninputs, setup_func_t setup_func, impl_func_t impl_func)
+    OiiotoolOp(Oiiotool& ot, string_view opname, cspan<const char*> argv,
+               int ninputs, setup_func_t setup_func = nullptr,
+               impl_func_t impl_func = nullptr)
         : ot(ot)
-        , m_nargs(argc)
+        , m_nargs((int)argv.size())
         , m_nimages(ninputs + 1)
         , m_setup_func(setup_func)
         , m_impl_func(impl_func)
@@ -779,23 +786,16 @@ public:
         if (Strutil::starts_with(opname, "--"))
             opname.remove_prefix(1);  // canonicalize to one dash
         m_opname = opname.substr(0, opname.find_first_of(':'));  // and no :
-        m_args.reserve(argc);
-        for (int i = 0; i < argc; ++i)
+        m_args.reserve(m_nargs);
+        for (int i = 0; i < m_nargs; ++i)
             m_args.push_back(ot.express(argv[i]));
         m_ir.resize(ninputs + 1);  // including reserving a spot for result
         for (int i = 0; i < ninputs; ++i)
             m_ir[ninputs - i] = ot.pop();
     }
-    OiiotoolOp(Oiiotool& ot, string_view opname, int argc, const char* argv[],
-               int ninputs, impl_func_t impl_func = {})
-        : OiiotoolOp(ot, opname, argc, argv, ninputs, {}, impl_func)
-    {
-    }
     OiiotoolOp(Oiiotool& ot, string_view opname, cspan<const char*> argv,
-               int ninputs, setup_func_t setup_func = nullptr,
-               impl_func_t impl_func = nullptr)
-        : OiiotoolOp(ot, opname, (int)argv.size(), (const char**)argv.data(),
-                     ninputs, setup_func, impl_func)
+               int ninputs, impl_func_t impl_func)
+        : OiiotoolOp(ot, opname, argv, ninputs, {}, impl_func)
     {
     }
     virtual ~OiiotoolOp() {}
@@ -881,9 +881,11 @@ public:
         // For each subimage, find the ImageBuf's for input and output
         // images, and call impl().
         for (int s = 0; s < subimages; ++s) {
+            m_current_subimage = s;
             // Get pointers for the ImageBufs for this subimage
             m_img.resize(nimages());
             for (int m = 0, nmip = ir(0)->miplevels(); m < nmip; ++m) {
+                m_current_miplevel = m;
                 for (int i = 0; i < nimages(); ++i)
                     m_img[i] = &((*ir(i))(std::min(s, ir(i)->subimages() - 1),
                                           std::min(m, ir(i)->miplevels(s))));
@@ -1042,6 +1044,10 @@ public:
     string_view opname() const { return m_opname; }
     ParamValueList& options() { return m_options; }
     const ParamValueList& options() const { return m_options; }
+    AttrDelegate<const ParamValueList> options(string_view name) const
+    {
+        return m_options[name];
+    }
     ImageBuf* img(int i) const { return m_img[i]; }
 
     // Retrieve an ImageRec we're working on. (Note: [0] is the output.)
@@ -1075,6 +1081,9 @@ public:
     void inplace(bool val) { m_inplace = val; }
     bool inplace() const { return m_inplace; }
 
+    int current_subimage() const { return m_current_subimage; }
+    int current_miplevel() const { return m_current_miplevel; }
+
 protected:
     Oiiotool& ot;
     std::string m_opname;
@@ -1093,6 +1102,8 @@ protected:
     setup_func_t m_setup_func;
     impl_func_t m_impl_func;
     new_output_imagerec_func_t m_new_output_imagerec_func;
+    int m_current_subimage;  // for impl(), which subimage are we on?
+    int m_current_miplevel;  // for impl(), which miplevel are we on?
 };
 
 

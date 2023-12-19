@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 // This implementation of thread_pool is based on CTPL.
@@ -34,6 +34,10 @@
 #endif
 
 #include <boost/container/flat_map.hpp>
+
+#ifdef _WIN32
+#    include <windows.h>
+#endif
 
 #if 0
 
@@ -151,16 +155,21 @@ public:
                     this->set_thread(i);
                 }
             } else {  // the number of threads is decreased
+                std::vector<std::unique_ptr<std::thread>> terminating_threads;
                 for (int i = oldNThreads - 1; i >= nThreads; --i) {
                     *this->flags[i] = true;  // this thread will finish
-                    this->terminating_threads.push_back(
-                        std::move(this->threads[i]));
+                    terminating_threads.push_back(std::move(this->threads[i]));
                     this->threads.erase(this->threads.begin() + i);
                 }
                 {
                     // stop the detached threads that were waiting
                     std::unique_lock<std::mutex> lock(this->mutex);
                     this->cv.notify_all();
+                }
+                // wait for the terminated threads to finish
+                for (auto& thread : terminating_threads) {
+                    if (thread->joinable())
+                        thread->join();
                 }
                 this->threads.resize(
                     nThreads);  // safe to delete because the threads are detached
@@ -238,16 +247,10 @@ public:
             if (thread->joinable())
                 thread->join();
         }
-        // wait for the terminated threads to finish
-        for (auto& thread : this->terminating_threads) {
-            if (thread->joinable())
-                thread->join();
-        }
         // if there were no threads in the pool but some functors in the queue, the functors are not deleted by the threads
         // therefore delete them here
         this->clear_queue();
         this->threads.clear();
-        this->terminating_threads.clear();
         this->flags.clear();
     }
 
@@ -349,7 +352,6 @@ private:
     }
 
     std::vector<std::unique_ptr<std::thread>> threads;
-    std::vector<std::unique_ptr<std::thread>> terminating_threads;
     std::vector<std::shared_ptr<std::atomic<bool>>> flags;
     mutable pvt::ThreadsafeQueue<std::function<void(int id)>*> q;
     std::atomic<bool> isDone;
@@ -471,11 +473,25 @@ thread_pool::very_busy() const
 
 
 
+static atomic_int default_thread_pool_created(0);
+
+
+
 thread_pool*
 default_thread_pool()
 {
     static std::unique_ptr<thread_pool> shared_pool(new thread_pool);
+    default_thread_pool_created = 1;
     return shared_pool.get();
+}
+
+
+
+void
+default_thread_pool_shutdown()
+{
+    if (default_thread_pool_created)
+        default_thread_pool()->resize(0);
 }
 
 

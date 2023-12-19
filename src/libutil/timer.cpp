@@ -1,19 +1,21 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include <cstdio>
 #include <cstdlib>
 
 #include <OpenImageIO/timer.h>
 
+#ifdef _WIN32
+#    include <windows.h>
+#endif
+
 
 OIIO_NAMESPACE_BEGIN
 
 double Timer::seconds_per_tick;
 Timer::ticks_t Timer::ticks_per_second;
-
-
 
 class TimerSetupOnce {
 public:
@@ -54,6 +56,16 @@ public:
 
 static TimerSetupOnce once;
 
-
+#ifdef _WIN32
+// a non-inline function on Windows, to avoid
+// including windows headers from OIIO public header.
+Timer::ticks_t
+Timer::now(void) const
+{
+    LARGE_INTEGER n;
+    QueryPerformanceCounter(&n);
+    return n.QuadPart;
+}
+#endif
 
 OIIO_NAMESPACE_END

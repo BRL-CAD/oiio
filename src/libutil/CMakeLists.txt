@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
-# SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# SPDX-License-Identifier: Apache-2.0
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 set (libOpenImageIO_Util_srcs argparse.cpp benchmark.cpp
                   errorhandler.cpp farmhash.cpp filesystem.cpp
@@ -35,6 +35,7 @@ if (NOT OIIO_USING_FMT_LOCAL)
 endif ()
 
 if (WIN32)
+    add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -DNOGDI -DVC_EXTRALEAN)
     target_link_libraries (OpenImageIO_Util PRIVATE psapi)
 endif()
 
@@ -83,7 +84,7 @@ install_targets (OpenImageIO_Util)
 
 
 
-if (OIIO_BUILD_TESTS)
+if (OIIO_BUILD_TESTS AND BUILD_TESTING)
 
     add_executable (argparse_test argparse_test.cpp)
     target_link_libraries (argparse_test PRIVATE OpenImageIO_Util)

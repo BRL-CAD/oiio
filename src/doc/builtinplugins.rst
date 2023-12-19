@@ -168,6 +168,8 @@ Z component of a normal map. This applies to images using DXT5 compression
 and images using BC5/ATI2 compression (normal X & Y components are in
 red & green channels).
 
+**Attributes**
+
 .. list-table::
    :widths: 30 10 65
    :header-rows: 1
@@ -215,27 +217,9 @@ When the attribute value is set to non-zero (default is zero), any input
 image using BC5/ATI2 compression format is assumed to be a normal map,
 even if pixel format "normal map" flag is not set.
 
-
-**Configuration settings for DDS output**
-
-When opening an DDS ImageOutput, the following special metadata tokens
-control aspects of the writing itself:
-
-.. list-table::
-   :widths: 30 10 65
-   :header-rows: 1
-
-   * - Output Configuration Attribute
-     - Type
-     - Meaning
-   * - ``oiio:ioproxy``
-     - ptr
-     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
-       example by writing to a memory buffer.
-
 **Custom I/O Overrides**
 
-DDS supports the "custom I/O" feature via the
+DDS input supports the "custom I/O" feature via the
 special ``"oiio:ioproxy"`` attributes (see Sections
 :ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
 the `set_ioproxy()` methods.
@@ -326,15 +310,15 @@ control aspects of the writing itself:
        will keep unaltered pixel values (versus the default OIIO behavior
        of automatically converting from RGB to the designated color space
        as the pixels are written).
-   * - ``oiio:ioproxy``
-     - ptr
-     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
-       example by writing to memory rather than the file system.
    * - ``oiio:dither``
      - int
      - If nonzero and outputting UINT8 values in the file from a source of
        higher bit depth, will add a small amount of random dither to combat
        the appearance of banding.
+   * - ``oiio:ioproxy``
+     - ptr
+     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
+       example by writing to memory rather than the file system.
 
 **Custom I/O Overrides**
 
@@ -647,7 +631,7 @@ control aspects of the writing itself:
 
 **Custom I/O Overrides**
 
-GIF supports the "custom I/O" feature via the
+GIF input and output support the "custom I/O" feature via the
 special ``"oiio:ioproxy"`` attributes (see Sections
 :ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
 the `set_ioproxy()` methods.
@@ -682,6 +666,7 @@ applications and to distribute HDR environment maps. But newer formats with
 native HDR support, such as OpenEXR, are vastly superior and should be
 preferred except when legacy file access is required.
 
+**Attributes**
 
 .. list-table::
    :widths: 30 10 65
@@ -695,7 +680,8 @@ preferred except when legacy file access is required.
      - encodes the orientation (see Section :ref:`sec-metadata-orientation`)
    * - ``oiio:ColorSpace``
      - string
-     - Color space (see Section :ref:`sec-metadata-color`).
+     - Color space (see Section :ref:`sec-metadata-color`). We currently
+       assume that any RGBE files encountered are linear with sRGB primaries.
    * - ``oiio:Gamma``
      - float
      - the gamma correction specified in the RGBE header (if it's gamma corrected).
@@ -738,7 +724,7 @@ control aspects of the writing itself:
 
 **Custom I/O Overrides**
 
-HDR supports the "custom I/O" feature via the
+HDR input and output support the "custom I/O" feature via the
 special ``"oiio:ioproxy"`` attributes (see Sections
 :ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
 the `set_ioproxy()` methods.
@@ -883,6 +869,8 @@ IFF
 ===============================================
 
 IFF files are used by Autodesk Maya and use the file extension :file:`.iff`.
+
+**Attributes**
 
 .. list-table::
    :widths: 30 10 65
@@ -1062,7 +1050,7 @@ control aspects of the writing itself:
 
 **Custom I/O Overrides**
 
-JPEG supports the "custom I/O" feature
+JPEG input and output support the "custom I/O" feature
 via the `ImageInput::set_ioproxy()` method and the special
 ``"oiio:ioproxy"`` attributes (see Section :ref:`sec-imageinput-ioproxy`).
 
@@ -1478,6 +1466,8 @@ coordinate mapping.  Layers may be scalar (1 channel) or vector (3 channel)
 fields, and the voxel data are always `float`. OpenVDB files always
 report as tiled, using the leaf dimension size.
 
+**Attributes**
+
 .. list-table::
    :widths: 30 10 65
    :header-rows: 1
@@ -1610,6 +1600,13 @@ control aspects of the writing itself:
        (``PNG_FILTER_NONE``), 16 (``PNG_FILTER_SUB``), 32
        (``PNG_FILTER_UP``), 64 (``PNG_FILTER_AVG``), or 128
        (``PNG_FILTER_PAETH``).
+
+       **Important**: We have noticed that 8 (PNG_FILTER_NONE) is much
+       faster than the default of NO_FILTERS (sometimes 3x or more faster),
+       but it also makes the resulting files quite a bit larger (sometimes
+       2x larger). If you need to optimize PNG write speed and are willing
+       to have larger PNG files on disk, you may want to use that value for
+       this attribute.
 
 **Custom I/O Overrides**
 
@@ -1785,7 +1782,7 @@ Lab or duotone modes.
 
 **Custom I/O Overrides**
 
-PSD supports the "custom I/O" feature via the special ``"oiio:ioproxy"``
+PSD output supports the "custom I/O" feature via the special ``"oiio:ioproxy"``
 attributes (see Sections :ref:`sec-imageoutput-ioproxy` and
 :ref:`sec-imageinput-ioproxy`) as well as the `set_ioproxy()` methods.
 
@@ -1806,6 +1803,7 @@ Ptex files, but the TextureSystem doesn't properly filter across face
 boundaries when using it as a texture.  OpenImageIO currently does not write
 Ptex files at all.
 
+**Attributes**
 
 .. list-table::
    :widths: 30 10 65
@@ -1928,8 +1926,17 @@ options are supported:
      - int
      - Set libraw user flip value : -1 ignored, other values are between [0; 8] with the same 
        definition than the Exif orientation code.
-
-
+   * - ``raw:threshold``
+     - float
+     - Libraw parameter for noise reduction through wavelet denoising.
+       The best threshold should be somewhere between 100 and 1000.
+       (Default: 0.0)
+   * - ``raw:fbdd_noiserd``
+     - int
+     - Controls FBDD noise reduction before demosaic.
+       0 - do not use FBDD noise reduction, 1 - light FBDD reduction,
+       2 (and more) - full FBDD reduction
+       (Default: 0)
 
 
 |
@@ -2024,6 +2031,24 @@ software developed at Wavefront.  RLA files commonly use the file extension
      - float
      - the gamma correction value (if specified).
 
+**Configuration settings for RLA input**
+
+When opening a RLA ImageInput with a *configuration* (see
+Section :ref:`sec-input-with-config`), the following special configuration
+options are supported:
+
+.. list-table::
+   :widths: 30 10 65
+   :header-rows: 1
+
+   * - Input Configuration Attribute
+     - Type
+     - Meaning
+   * - ``oiio:ioproxy``
+     - ptr
+     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
+       example by reading from memory rather than the file system.
+
 **Configuration settings for RLA output**
 
 When opening a RLA ImageOutput, the following special metadata tokens
@@ -2041,6 +2066,17 @@ control aspects of the writing itself:
      - If nonzero and outputting UINT8 values in the file from a source of
        higher bit depth, will add a small amount of random dither to combat
        the appearance of banding.
+   * - ``oiio:ioproxy``
+     - ptr
+     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
+       example by reading from memory rather than the file system.
+
+**Custom I/O Overrides**
+
+RLA input and output support the "custom I/O" feature via the
+special ``"oiio:ioproxy"`` attributes (see Sections
+:ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
+the `set_ioproxy()` methods.
 
 **Limitations**
 
@@ -2081,6 +2117,24 @@ otherwise: no support for tiles, no MIPmaps, no multi-subimage, only 8- and
      - string
      - Image name.
 
+**Configuration settings for SGI input**
+
+When opening a SGI ImageInput with a *configuration* (see
+Section :ref:`sec-input-with-config`), the following special configuration
+options are supported:
+
+.. list-table::
+   :widths: 30 10 65
+   :header-rows: 1
+
+   * - Input Configuration Attribute
+     - Type
+     - Meaning
+   * - ``oiio:ioproxy``
+     - ptr
+     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
+       example by reading from memory rather than the file system.
+
 **Configuration settings for SGI output**
 
 When opening an SGI ImageOutput, the following special metadata tokens
@@ -2098,7 +2152,18 @@ control aspects of the writing itself:
      - If nonzero and outputting UINT8 values in the file from a source of
        higher bit depth, will add a small amount of random dither to combat
        the appearance of banding.
+   * - ``oiio:ioproxy``
+     - ptr
+     - Pointer to a ``Filesystem::IOProxy`` that will handle the I/O, for
+       example by reading from memory rather than the file system.
 
+
+**Custom I/O Overrides**
+
+SGI input and output support the "custom I/O" feature via the
+special ``"oiio:ioproxy"`` attributes (see Sections
+:ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
+the `set_ioproxy()` methods.
 
 |
 
@@ -2114,6 +2179,8 @@ files use the file extension :file:`.pic`.
 The Softimage PIC format is sometimes used for legacy apps, but has little
 merit otherwise, so currently OpenImageIO only reads Softimage files and is
 unable to write them.
+
+**Attributes**
 
 .. list-table::
    :widths: 30 10 65
@@ -2259,7 +2326,7 @@ control aspects of the writing itself:
 
 **Custom I/O Overrides**
 
-DDS supports the "custom I/O" feature via the
+Targa input and output support the "custom I/O" feature via the
 special ``"oiio:ioproxy"`` attributes (see Sections
 :ref:`sec-imageoutput-ioproxy` and :ref:`sec-imageinput-ioproxy`) as well as
 the `set_ioproxy()` methods.
@@ -2445,9 +2512,13 @@ aspects of the writing itself:
        TIFF files despite their being legal.
    * - ``tiff:ColorSpace``
      - string
-     - Requests that the file be saved with a non-RGB color spaces. Choices
-       are ``RGB``, ``CMYK``.  (``YCbCr``, ``CIELAB``, ``ICCLAB``,
-       ``ITULAB`` are not yet supported.)
+     - Requests that the RGB image be converted and saved in the TIFF file in
+       a non-RGB color space. Choices are ``RGB``, ``CMYK``.  (Note that
+       ``YCbCr``, ``CIELAB``, ``ICCLAB``, ``ITULAB`` are not yet supported
+       for convertion. However, if the `oiio:ColorSpace` is one of those,
+       meaning that the image data is presumed to already be in that
+       space, the TIFF PhotometricInterpretation tag will be set to convey
+       this information.)
    * - ``tiff:zipquality``
      - int
      - A time-vs-space knob for ``zip`` compression, ranging from 1-9
@@ -2475,18 +2546,17 @@ aspects of the writing itself:
 **TIFF compression modes**
 
 The full list of possible TIFF compression mode values are as
-follows ($ ^*$ indicates that OpenImageIO can write that format, and is not
-part of the format name):
+follows.
 
-    ``none`` $ ^*$
-    ``lzw`` $ ^*$
-    ``zip`` $ ^*$
+    ``none`` :sup:`*`
+    ``lzw`` :sup:`*`
+    ``zip`` :sup:`*`
     ``ccitt_t4``
     ``ccitt_t6``
     ``ccittfax3``
     ``ccittfax4``
     ``ccittrle2``
-    ``ccittrle`` $ ^*$
+    ``ccittrle`` :sup:`*`
     ``dcs``
     ``isojbig``
     ``IT8BL``
@@ -2494,11 +2564,11 @@ part of the format name):
     ``IT8LW``
     ``IT8MP``
     ``jp2000``
-    ``jpeg`` $ ^*$
+    ``jpeg`` :sup:`*`
     ``lzma``
     ``next``
     ``ojpeg``
-    ``packbits`` $ ^*$
+    ``packbits`` :sup:`*`
     ``pixarfilm``
     ``pixarlog``
     ``sgilog24``
@@ -2506,6 +2576,10 @@ part of the format name):
     ``T43``
     ``T85``
     ``thunderscan``
+
+:sup:`*` indicates that OpenImageIO can write that format, and is not
+part of the format name. The compression types without the asterisk are
+supported for reading but not for writing.
 
 **Custom I/O Overrides**
 

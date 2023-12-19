@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 #include "iff_pvt.h"
 
 #include <cmath>
@@ -87,6 +87,9 @@ private:
         return read_type_len(name, len) && read_str(val, len);
     }
 
+    // Read a 4-byte type code (no endian swap), and if that succeeds (beware
+    // of EOF or other errors), then also read a 32 bit size (subject to
+    // endian swap).
     bool read_typesize(uint8_t type[4], uint32_t& size)
     {
         return ioread(type, 1, 4) && read(&size);
@@ -181,7 +184,7 @@ IffInput::open(const std::string& name, ImageSpec& spec)
     m_spec.full_height = m_iff_header.height;
 
     // tiles
-    if (m_iff_header.tile_width > 0 || m_iff_header.tile_height > 0) {
+    if (m_iff_header.tile_width > 0 && m_iff_header.tile_height > 0) {
         m_spec.tile_width  = m_iff_header.tile_width;
         m_spec.tile_height = m_iff_header.tile_height;
         // only 1 subimage for IFF

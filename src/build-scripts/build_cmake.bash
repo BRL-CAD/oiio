@@ -4,7 +4,7 @@
 #
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Exit the whole script if any command fails.
 set -ex
@@ -12,7 +12,7 @@ set -ex
 echo "Building cmake"
 uname
 
-CMAKE_VERSION=${CMAKE_VERSION:=3.12.4}
+CMAKE_VERSION=${CMAKE_VERSION:=3.18.5}
 LOCAL_DEPS_DIR=${LOCAL_DEPS_DIR:=${PWD}/ext}
 CMAKE_INSTALL_DIR=${CMAKE_INSTALL_DIR:=${LOCAL_DEPS_DIR}/cmake}
 

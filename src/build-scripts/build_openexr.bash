@@ -3,8 +3,8 @@
 # Utility script to download and build OpenEXR & IlmBase
 
 # Copyright Contributors to the OpenImageIO project.
-# SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# SPDX-License-Identifier: Apache-2.0
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Exit the whole script if any command fails.
 set -ex
@@ -28,7 +28,6 @@ echo "Building OpenEXR ${OPENEXR_VERSION}"
 echo "OpenEXR build dir will be: ${OPENEXR_BUILD_DIR}"
 echo "OpenEXR install dir will be: ${OPENEXR_INSTALL_DIR}"
 echo "OpenEXR Build type is ${OPENEXR_BUILD_TYPE}"
-echo "CMAKE_PREFIX_PATH is ${CMAKE_PREFIX_PATH}"
 
 # Clone OpenEXR project (including IlmBase) from GitHub and build
 if [[ ! -e ${OPENEXR_SOURCE_DIR} ]] ; then
@@ -36,42 +35,25 @@ if [[ ! -e ${OPENEXR_SOURCE_DIR} ]] ; then
     git clone ${OPENEXR_REPO} ${OPENEXR_SOURCE_DIR}
 fi
 mkdir -p ${OPENEXR_INSTALL_DIR} && true
-mkdir -p ${OPENEXR_BUILD_DIR} && true
 
 pushd ${OPENEXR_SOURCE_DIR}
 git checkout ${OPENEXR_VERSION} --force
 
-if [[ ${OPENEXR_VERSION} == "v2.3.0" ]] ; then
-    # Simplified setup for 2.3+
-    cd ${OPENEXR_BUILD_DIR}
-    cmake -DCMAKE_BUILD_TYPE=${OPENEXR_BUILD_TYPE} \
-            -DCMAKE_INSTALL_PREFIX="${OPENEXR_INSTALL_DIR}" \
-            -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
-            -DILMBASE_PACKAGE_PREFIX="${OPENEXR_INSTALL_DIR}" \
-            -DOPENEXR_BUILD_UTILS=0 \
-            -DOPENEXR_BUILD_TESTS=0 \
-            -DOPENEXR_BUILD_PYTHON_LIBS=0 \
-            -DCMAKE_CXX_FLAGS="${OPENEXR_CXX_FLAGS}" \
-            ${OPENEXR_CMAKE_FLAGS} ${OPENEXR_SOURCE_DIR}
-    time cmake --build . --target install --config ${OPENEXR_BUILD_TYPE}
-else
-    # Simplified setup for 2.4+
-    cd ${OPENEXR_BUILD_DIR}
-    cmake -DCMAKE_BUILD_TYPE=${OPENEXR_BUILD_TYPE} \
-            -DCMAKE_INSTALL_PREFIX="${OPENEXR_INSTALL_DIR}" \
-            -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
-            -DILMBASE_PACKAGE_PREFIX="${OPENEXR_INSTALL_DIR}" \
-            -DOPENEXR_BUILD_UTILS=0 \
-            -DBUILD_TESTING=0 \
-            -DPYILMBASE_ENABLE=0 \
-            -DOPENEXR_VIEWERS_ENABLE=0 \
-            -DINSTALL_OPENEXR_EXAMPLES=0 \
-            -DOPENEXR_INSTALL_EXAMPLES=0 \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_CXX_FLAGS="${OPENEXR_CXX_FLAGS}" \
-            ${OPENEXR_CMAKE_FLAGS} ${OPENEXR_SOURCE_DIR}
-    time cmake --build . --target install --config ${OPENEXR_BUILD_TYPE}
-fi
+cmake   -S . -B ${OPENEXR_BUILD_DIR} \
+        -DCMAKE_BUILD_TYPE=${OPENEXR_BUILD_TYPE} \
+        -DCMAKE_INSTALL_PREFIX="${OPENEXR_INSTALL_DIR}" \
+        -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
+        -DILMBASE_PACKAGE_PREFIX="${OPENEXR_INSTALL_DIR}" \
+        -DOPENEXR_BUILD_UTILS=0 \
+        -DBUILD_TESTING=0 \
+        -DPYILMBASE_ENABLE=0 \
+        -DOPENEXR_VIEWERS_ENABLE=0 \
+        -DINSTALL_OPENEXR_EXAMPLES=0 \
+        -DOPENEXR_INSTALL_EXAMPLES=0 \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_CXX_FLAGS="${OPENEXR_CXX_FLAGS}" \
+        ${OPENEXR_CMAKE_FLAGS}
+time cmake --build ${OPENEXR_BUILD_DIR} --target install --config ${OPENEXR_BUILD_TYPE}
 
 popd
 

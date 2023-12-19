@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cmath>
@@ -22,6 +22,38 @@
 #include <OpenImageIO/sysutil.h>
 #include <OpenImageIO/tiffutils.h>
 #include <OpenImageIO/timer.h>
+
+
+// clang-format off
+#ifdef TIFFLIB_MAJOR_VERSION
+// libtiff >= 4.5 defines versions by number -- use them.
+#    define OIIO_TIFFLIB_VERSION (TIFFLIB_MAJOR_VERSION * 10000 \
+                                  + TIFFLIB_MINOR_VERSION * 100 \
+                                  + TIFFLIB_MICRO_VERSION)
+// For older libtiff, we need to figure it out by date.
+#elif TIFFLIB_VERSION >= 20220520
+#    define OIIO_TIFFLIB_VERSION 40400
+#elif TIFFLIB_VERSION >= 20210416
+#    define OIIO_TIFFLIB_VERSION 40300
+#elif TIFFLIB_VERSION >= 20201219
+#    define OIIO_TIFFLIB_VERSION 40200
+#elif TIFFLIB_VERSION >= 20191103
+#    define OIIO_TIFFLIB_VERSION 40100
+#elif TIFFLIB_VERSION >= 20120922
+#    define OIIO_TIFFLIB_VERSION 40003
+#elif TIFFLIB_VERSION >= 20111221
+#    define OIIO_TIFFLIB_VERSION 40000
+#elif TIFFLIB_VERSION >= 20090820
+#    define OIIO_TIFFLIB_VERSION 30900
+#else
+#    error "libtiff 3.9.0 or later is required"
+#endif
+// clang-format on
+
+
+// Switch to 1 to enable writing TIFF files with JPEG compression. It seems
+// very buggy and nobody seems to need it anyway, so we're disabling it.
+#define ENABLE_JPEG_COMPRESSION 0
 
 
 OIIO_PLUGIN_NAMESPACE_BEGIN
@@ -180,6 +212,39 @@ private:
                              (const unsigned char*)data + nbytes);
         return m_scratch.data();
     }
+
+#if OIIO_TIFFLIB_VERSION >= 40500
+    std::string m_last_error;
+    spin_mutex m_last_error_mutex;
+
+    std::string oiio_tiff_last_error()
+    {
+        spin_lock lock(m_last_error_mutex);
+        return m_last_error;
+    }
+
+    // TIFF 4.5+ has a mechanism for per-file thread-safe error handlers.
+    // Use it.
+    static int my_error_handler(TIFF* tif, void* user_data,
+                                const char* /*module*/, const char* fmt,
+                                va_list ap)
+    {
+        TIFFOutput* self = (TIFFOutput*)user_data;
+        spin_lock lock(self->m_last_error_mutex);
+        self->m_last_error = Strutil::vsprintf(fmt, ap);
+        return 1;
+    }
+
+    static int my_warning_handler(TIFF* tif, void* user_data,
+                                  const char* /*module*/, const char* fmt,
+                                  va_list ap)
+    {
+        TIFFOutput* self = (TIFFOutput*)user_data;
+        spin_lock lock(self->m_last_error_mutex);
+        self->m_last_error = Strutil::vsprintf(fmt, ap);
+        return 1;
+    }
+#endif
 };
 
 
@@ -211,10 +276,12 @@ OIIO_PLUGIN_EXPORTS_END
 
 
 
+#if OIIO_TIFFLIB_VERSION < 40500
 extern std::string&
 oiio_tiff_last_error();
 extern void
 oiio_tiff_set_error_handler();
+#endif
 
 
 
@@ -227,12 +294,14 @@ static std::pair<int, const char*> tiff_output_compressions[] = {
     { COMPRESSION_ADOBE_DEFLATE, "zip" },  // deflate / zip
     { COMPRESSION_DEFLATE, "zip" },        // deflate / zip
     { COMPRESSION_CCITTRLE, "ccittrle" },  // CCITT RLE
-    //  { COMPRESSION_CCITTFAX3,     "ccittfax3" },   // CCITT group 3 fax
-    //  { COMPRESSION_CCITT_T4,      "ccitt_t4" },    // CCITT T.4
-    //  { COMPRESSION_CCITTFAX4,     "ccittfax4" },   // CCITT group 4 fax
-    //  { COMPRESSION_CCITT_T6,      "ccitt_t6" },    // CCITT T.6
-    //  { COMPRESSION_OJPEG,         "ojpeg" },       // old (pre-TIFF6.0) JPEG
+//  { COMPRESSION_CCITTFAX3,     "ccittfax3" },   // CCITT group 3 fax
+//  { COMPRESSION_CCITT_T4,      "ccitt_t4" },    // CCITT T.4
+//  { COMPRESSION_CCITTFAX4,     "ccittfax4" },   // CCITT group 4 fax
+//  { COMPRESSION_CCITT_T6,      "ccitt_t6" },    // CCITT T.6
+//  { COMPRESSION_OJPEG,         "ojpeg" },       // old (pre-TIFF6.0) JPEG
+#if ENABLE_JPEG_COMPRESSION
     { COMPRESSION_JPEG, "jpeg" },  // JPEG
+#endif
     //  { COMPRESSION_NEXT,          "next" },        // NeXT 2-bit RLE
     //  { COMPRESSION_CCITTRLEW,     "ccittrle2" },   // #1 w/ word alignment
     { COMPRESSION_PACKBITS, "packbits" },  // Macintosh RLE
@@ -248,7 +317,7 @@ static std::pair<int, const char*> tiff_output_compressions[] = {
 //  { COMPRESSION_SGILOG,        "sgilog" },      // SGI log luminance RLE
 //  { COMPRESSION_SGILOG24,      "sgilog24" },    // SGI log 24bit
 //  { COMPRESSION_JP2000,        "jp2000" },      // Leadtools JPEG2000
-#if defined(TIFF_VERSION_BIG) && TIFFLIB_VERSION >= 20120922
+#if defined(TIFF_VERSION_BIG) && OIIO_TIFFLIB_VERSION >= 40003
 // Others supported in more recent TIFF library versions.
 //  { COMPRESSION_T85,           "T85" },         // TIFF/FX T.85 JBIG
 //  { COMPRESSION_T43,           "T43" },         // TIFF/FX T.43 color layered JBIG
@@ -269,7 +338,9 @@ tiff_compression_code(string_view name)
 
 TIFFOutput::TIFFOutput()
 {
+#if OIIO_TIFFLIB_VERSION < 40500
     oiio_tiff_set_error_handler();
+#endif
     init();
 }
 
@@ -381,39 +452,22 @@ bool
 TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
                  OpenMode mode)
 {
-    if (mode == AppendMIPLevel) {
-        errorf("%s does not support MIP levels", format_name());
-        return false;
-    }
-
     closetif();
-    m_spec = userspec;  // Stash the spec
+
+    if (!check_open(mode, userspec,
+                    { 0, 1 << 20, 0, 1 << 20, 0, 1 << 16, 0, 1 << 16 }))
+        return false;
 
     // Check for things this format doesn't support
-    if (m_spec.width < 1 || m_spec.height < 1) {
-        errorf("Image resolution must be at least 1x1, you asked for %d x %d",
-               m_spec.width, m_spec.height);
-        return false;
-    }
     if (m_spec.tile_width) {
         if (m_spec.tile_width % 16 != 0 || m_spec.tile_height % 16 != 0
             || m_spec.tile_height == 0) {
-            errorf("Tile size must be a multiple of 16, you asked for %d x %d",
-                   m_spec.tile_width, m_spec.tile_height);
+            errorfmt("Tile size must be a multiple of 16, you asked for {} x {}",
+                     m_spec.tile_width, m_spec.tile_height);
             return false;
         }
     }
-    if (m_spec.depth < 1)
-        m_spec.depth = 1;
-    if (m_spec.channelformats.size()) {
-        if (allval(m_spec.channelformats, m_spec.format))
-            m_spec.channelformats.clear();
-        else {
-            errorf("%s does not support per-channel data formats",
-                   format_name());
-            return false;
-        }
-    }
+
     ioproxy_retrieve_from_config(m_spec);
 
     // Classic/standard TIFF files use 32 bit offsets, and so are limited to
@@ -439,23 +493,48 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
                                      : (mode == AppendSubimage ? "a" : "w");
 
     // Open the file
+#if OIIO_TIFFLIB_VERSION >= 40500
+    auto openopts = TIFFOpenOptionsAlloc();
+    TIFFOpenOptionsSetErrorHandlerExtR(openopts, my_error_handler, this);
+    TIFFOpenOptionsSetWarningHandlerExtR(openopts, my_warning_handler, this);
+#endif
     if (ioproxy_opened()) {
         ioseek(0);
+#if OIIO_TIFFLIB_VERSION >= 40500
+        m_tif = TIFFClientOpenExt(name.c_str(), openmode, ioproxy(),
+                                  writer_readproc, writer_writeproc,
+                                  writer_seekproc, writer_closeproc,
+                                  writer_sizeproc, writer_mapproc,
+                                  writer_unmapproc, openopts);
+#else
         m_tif = TIFFClientOpen(name.c_str(), openmode, ioproxy(),
                                writer_readproc, writer_writeproc,
                                writer_seekproc, writer_closeproc,
                                writer_sizeproc, writer_mapproc,
                                writer_unmapproc);
+#endif
     } else {
 #ifdef _WIN32
+#    if OIIO_TIFFLIB_VERSION >= 40500
+        m_tif = TIFFOpenWExt(Strutil::utf8_to_utf16wstring(name).c_str(),
+                             openmode, openopts);
+#    else
         m_tif = TIFFOpenW(Strutil::utf8_to_utf16wstring(name).c_str(),
                           openmode);
+#    endif
 #else
+#    if OIIO_TIFFLIB_VERSION >= 40500
+        m_tif = TIFFOpenExt(name.c_str(), openmode, openopts);
+#    else
         m_tif = TIFFOpen(name.c_str(), openmode);
+#    endif
 #endif
     }
+#if OIIO_TIFFLIB_VERSION >= 40500
+    TIFFOpenOptionsFree(openopts);
+#endif
     if (!m_tif) {
-        errorf("Could not open \"%s\"", name);
+        errorfmt("Could not open \"{}\"", name);
         return false;
     }
 
@@ -555,6 +634,7 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
     }
     TIFFSetField(m_tif, TIFFTAG_BITSPERSAMPLE, m_bitspersample);
     TIFFSetField(m_tif, TIFFTAG_SAMPLEFORMAT, sampformat);
+    m_outputchans = m_spec.nchannels;
 
     m_photometric = (m_spec.nchannels >= 3 ? PHOTOMETRIC_RGB
                                            : PHOTOMETRIC_MINISBLACK);
@@ -564,12 +644,17 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
     std::tie(comp, qual) = m_spec.decode_compression_metadata("zip");
 
     if (Strutil::iequals(comp, "jpeg")
-        && (m_spec.format != TypeDesc::UINT8 || m_spec.nchannels != 3)) {
-        comp = "zip";  // can't use JPEG for anything but 3xUINT8
+#if ENABLE_JPEG_COMPRESSION
+        && (m_spec.format != TypeDesc::UINT8 || m_spec.nchannels != 3)
+    // can't use JPEG for anything but 3xUINT8
+#endif
+    ) {
+        comp = "zip";
         qual = -1;
     }
     m_compression = tiff_compression_code(comp);
-    TIFFSetField(m_tif, TIFFTAG_COMPRESSION, m_compression);
+    // N.B. TIFFTAG_COMPRESSION is actually set farther below, because of some
+    // interaction with PhotometricInterpretation.
 
     // Use predictor when using compression
     m_predictor = PREDICTOR_NONE;
@@ -588,8 +673,6 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
             // predictors not supported for unusual bit depths (e.g. 10)
             m_predictor = PREDICTOR_HORIZONTAL;
         }
-        if (m_predictor != PREDICTOR_NONE)
-            TIFFSetField(m_tif, TIFFTAG_PREDICTOR, m_predictor);
         if (m_compression == COMPRESSION_ADOBE_DEFLATE) {
             qual = m_spec.get_int_attribute("tiff:zipquality", qual);
             if (qual == -1)
@@ -600,6 +683,7 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
                 m_zipquality = qual;
             }
         }
+#if ENABLE_JPEG_COMPRESSION
     } else if (m_compression == COMPRESSION_JPEG) {
         if (qual <= 0)
             qual = 95;
@@ -614,14 +698,16 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
             TIFFSetField(m_tif, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
             m_photometric = PHOTOMETRIC_YCBCR;
         }
+#endif
     }
-    m_outputchans = m_spec.nchannels;
+
     if (m_photometric == PHOTOMETRIC_RGB) {
         // There are a few ways in which we allow allow the user to specify
         // translation to different photometric types.
-        string_view photo = m_spec.get_string_attribute("tiff:ColorSpace");
-        if (Strutil::iequals(photo, "CMYK")
-            || Strutil::iequals(photo, "color separated")) {
+        string_view tiffcs = m_spec.get_string_attribute("tiff:ColorSpace");
+        string_view oiiocs = m_spec.get_string_attribute("oiio:ColorSpace");
+        if (Strutil::iequals(oiiocs, "CMYK") || Strutil::iequals(tiffcs, "CMYK")
+            || Strutil::iequals(tiffcs, "color separated")) {
             // User has requested via the "tiff:ColorSpace" attribute that
             // the file be written as color separated channels.
             m_photometric = PHOTOMETRIC_SEPARATED;
@@ -661,10 +747,52 @@ TIFFOutput::open(const std::string& name, const ImageSpec& userspec,
                              &inknames[0]);
                 TIFFSetField(m_tif, TIFFTAG_NUMBEROFINKS, m_spec.nchannels);
             }
+        } else if (Strutil::iequals(oiiocs, "YCbCr")) {
+            m_photometric = PHOTOMETRIC_YCBCR;
+        } else if (Strutil::iequals(oiiocs, "CIELAB")) {
+            m_photometric = PHOTOMETRIC_CIELAB;
+        } else if (Strutil::iequals(oiiocs, "ICCLAB")) {
+            m_photometric = PHOTOMETRIC_ICCLAB;
+        } else if (Strutil::iequals(oiiocs, "ITULAB")) {
+            m_photometric = PHOTOMETRIC_ITULAB;
+        } else if (Strutil::iequals(oiiocs, "LOGL")) {
+            m_photometric = PHOTOMETRIC_LOGL;
+        } else if (Strutil::iequals(oiiocs, "LOGLUV")) {
+            m_photometric = PHOTOMETRIC_LOGLUV;
         }
+    }
+    // Quirk: LOGL/LOGLUV photometric must use SGILOG/SGILOG24 compression,
+    // respectively, and vice versa.
+    if (m_photometric == PHOTOMETRIC_LOGL) {
+        m_compression = COMPRESSION_SGILOG;
+        m_predictor   = PREDICTOR_NONE;
+    } else if (m_compression == COMPRESSION_SGILOG) {
+        m_compression = COMPRESSION_ADOBE_DEFLATE;
+    }
+    if (m_photometric == PHOTOMETRIC_LOGLUV) {
+        m_compression = COMPRESSION_SGILOG24;
+        m_predictor   = PREDICTOR_NONE;
+    } else if (m_compression == COMPRESSION_SGILOG24) {
+        m_compression = COMPRESSION_ADOBE_DEFLATE;
+    }
+    if (m_photometric == PHOTOMETRIC_LOGL
+        || m_photometric == PHOTOMETRIC_LOGLUV) {
+        int datafmt = SGILOGDATAFMT_RAW;
+        switch (m_spec.format.basetype) {
+        case TypeDesc::INT16:
+        case TypeDesc::UINT16: datafmt = SGILOGDATAFMT_16BIT; break;
+        case TypeDesc::FLOAT: datafmt = SGILOGDATAFMT_FLOAT; break;
+        // case TypeDesc::UINT8:  /* NOT SUPPORTED BY LIBTIFF? */
+        //    datafmt = SGILOGDATAFMT_8BIT; break;
+        default: break;
+        }
+        TIFFSetField(m_tif, TIFFTAG_SGILOGDATAFMT, datafmt);
     }
 
     TIFFSetField(m_tif, TIFFTAG_PHOTOMETRIC, m_photometric);
+    TIFFSetField(m_tif, TIFFTAG_COMPRESSION, m_compression);
+    if (m_predictor != PREDICTOR_NONE)
+        TIFFSetField(m_tif, TIFFTAG_PREDICTOR, m_predictor);
 
     // ExtraSamples tag
     if ((m_spec.alpha_channel >= 0 || m_spec.nchannels > 3)
@@ -934,7 +1062,7 @@ TIFFOutput::put_parameter(const std::string& name, TypeDesc type,
 bool
 TIFFOutput::write_exif_data()
 {
-#if defined(TIFF_VERSION_BIG) && TIFFLIB_VERSION >= 20120922
+#if defined(TIFF_VERSION_BIG) && OIIO_TIFFLIB_VERSION >= 40003
     // Older versions of libtiff do not support writing Exif directories
 
     if (m_spec.get_int_attribute("tiff:write_exif", 1) == 0) {
@@ -963,21 +1091,23 @@ TIFFOutput::write_exif_data()
     if (!any_exif)
         return true;
 
+#    if ENABLE_JPEG_COMPRESSION
     if (m_compression == COMPRESSION_JPEG) {
         // For reasons we don't understand, JPEG-compressed TIFF seems
         // to not output properly without a directory checkpoint here.
         TIFFCheckpointDirectory(m_tif);
     }
+#    endif
 
     // First, finish writing the current directory
     if (!TIFFWriteDirectory(m_tif)) {
-        errorf("failed TIFFWriteDirectory()");
+        errorfmt("failed TIFFWriteDirectory()");
         return false;
     }
 
     // Create an Exif directory
     if (TIFFCreateEXIFDirectory(m_tif) != 0) {
-        errorf("failed TIFFCreateEXIFDirectory()");
+        errorfmt("failed TIFFCreateEXIFDirectory()");
         return false;
     }
 
@@ -1018,7 +1148,7 @@ TIFFOutput::write_exif_data()
     uint64_t dir_offset = 0;
 #    endif
     if (!TIFFWriteCustomDirectory(m_tif, &dir_offset)) {
-        errorf("failed TIFFWriteCustomDirectory() of the Exif data");
+        errorfmt("failed TIFFWriteCustomDirectory() of the Exif data");
         return false;
     }
     // Go back to the first directory, and add the EXIFIFD pointer.
@@ -1136,8 +1266,8 @@ TIFFOutput::write_scanline(int y, int z, TypeDesc format, const void* data,
                                   c)
                 < 0) {
                 std::string err = oiio_tiff_last_error();
-                errorf("TIFFWriteScanline failed writing line y=%d,z=%d (%s)",
-                       y, z, err.size() ? err.c_str() : "unknown error");
+                errorfmt("TIFFWriteScanline failed writing line y={},z={} ({})",
+                         y, z, err.size() ? err.c_str() : "unknown error");
                 return false;
             }
         }
@@ -1148,8 +1278,8 @@ TIFFOutput::write_scanline(int y, int z, TypeDesc format, const void* data,
         data = move_to_scratch(data, scanline_vals * m_spec.format.size());
         if (TIFFWriteScanline(m_tif, (tdata_t)data, y) < 0) {
             std::string err = oiio_tiff_last_error();
-            errorf("TIFFWriteScanline failed writing line y=%d,z=%d (%s)", y, z,
-                   err.size() ? err.c_str() : "unknown error");
+            errorfmt("TIFFWriteScanline failed writing line y={},z={} ({})", y,
+                     z, err.size() ? err.c_str() : "unknown error");
             return false;
         }
     }
@@ -1303,15 +1433,15 @@ TIFFOutput::write_scanlines(int ybegin, int yend, int z, TypeDesc format,
         // it needs is not yet done.
         tasks.wait_for_task(stripidx);
         if (!ok) {
-            errorf("Compression error");
+            errorfmt("Compression error");
             return false;
         }
         if (TIFFWriteRawStrip(m_tif, stripnum, (tdata_t)cbuf,
                               tmsize_t(compressed_len[stripidx]))
             < 0) {
             std::string err = oiio_tiff_last_error();
-            errorf("TIFFWriteRawStrip failed writing line y=%d,z=%d: %s", y, z,
-                   err.size() ? err.c_str() : "unknown error");
+            errorfmt("TIFFWriteRawStrip failed writing line y={},z={}: {}", y,
+                     z, err.size() ? err.c_str() : "unknown error");
             return false;
         }
     }
@@ -1384,9 +1514,9 @@ TIFFOutput::write_tile(int x, int y, int z, TypeDesc format, const void* data,
                               z, c)
                 < 0) {
                 std::string err = oiio_tiff_last_error();
-                errorf("TIFFWriteTile failed writing tile x=%d,y=%d,z=%d (%s)",
-                       x + m_spec.x, y + m_spec.y, z + m_spec.z,
-                       err.size() ? err.c_str() : "unknown error");
+                errorfmt("TIFFWriteTile failed writing tile x={},y={},z={} ({})",
+                         x + m_spec.x, y + m_spec.y, z + m_spec.z,
+                         err.size() ? err.c_str() : "unknown error");
                 return false;
             }
         }
@@ -1397,9 +1527,9 @@ TIFFOutput::write_tile(int x, int y, int z, TypeDesc format, const void* data,
         data = move_to_scratch(data, tile_vals * m_spec.format.size());
         if (TIFFWriteTile(m_tif, (tdata_t)data, x, y, z, 0) < 0) {
             std::string err = oiio_tiff_last_error();
-            errorf("TIFFWriteTile failed writing tile x=%d,y=%d,z=%d (%s)",
-                   x + m_spec.x, y + m_spec.y, z + m_spec.z,
-                   err.size() ? err.c_str() : "unknown error");
+            errorfmt("TIFFWriteTile failed writing tile x={},y={},z={} ({})",
+                     x + m_spec.x, y + m_spec.y, z + m_spec.z,
+                     err.size() ? err.c_str() : "unknown error");
             return false;
         }
     }
@@ -1557,15 +1687,15 @@ TIFFOutput::write_tiles(int xbegin, int xend, int ybegin, int yend, int zbegin,
                 tasks.wait_for_task(tileno);
                 char* cbuf = compressed_scratch.get() + tileno * cbound;
                 if (!ok) {
-                    errorf("Compression error");
+                    errorfmt("Compression error");
                     return false;
                 }
                 if (TIFFWriteRawTile(m_tif, uint32_t(tile_index(x, y, z)), cbuf,
                                      compressed_len[tileno])
                     < 0) {
                     std::string err = oiio_tiff_last_error();
-                    errorf(
-                        "TIFFWriteRawTile failed writing tile %d (x=%d,y=%d,z=%d): %s",
+                    errorfmt(
+                        "TIFFWriteRawTile failed writing tile {} (x={},y={},z={}): %s",
                         tile_index(x, y, z), x, y, z,
                         err.size() ? err.c_str() : "unknown error");
                     return false;

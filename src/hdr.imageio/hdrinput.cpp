@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cassert>
@@ -41,6 +41,7 @@ public:
     {
         return feature == "ioproxy";
     }
+    bool valid_file(Filesystem::IOProxy* ioproxy) const override;
     bool open(const std::string& name, ImageSpec& spec) override;
     bool open(const std::string& name, ImageSpec& newspec,
               const ImageSpec& config) override;
@@ -203,6 +204,19 @@ rgbe2float(float& red, float& green, float& blue, unsigned char rgbe[4])
 
 
 bool
+HdrInput::valid_file(Filesystem::IOProxy* ioproxy) const
+{
+    if (!ioproxy || ioproxy->mode() != Filesystem::IOProxy::Mode::Read)
+        return false;
+
+    char magic[2] {};
+    const size_t numRead = ioproxy->pread(magic, sizeof(magic), 0);
+    return numRead == sizeof(magic) && memcmp(magic, "#?", sizeof(magic)) == 0;
+}
+
+
+
+bool
 HdrInput::open(const std::string& name, ImageSpec& newspec,
                const ImageSpec& config)
 {
@@ -277,7 +291,10 @@ HdrInput::RGBE_ReadHeader()
     if (!line.size())
         return false;
 
-    m_spec.attribute("oiio:ColorSpace", "linear");  // presume linear
+    m_spec.attribute("oiio:ColorSpace", "lin_srgb");
+    // presume linear w/ srgb primaries -- seems like the safest assumption
+    // for this old file format.
+
     bool found_FORMAT_line = false;
     for (int nlines = 0; nlines < 100 /* safety */; ++nlines) {
         if (line.size() == 0 || line[0] == '\n')  // stop at blank line
@@ -493,11 +510,6 @@ HdrInput::read_native_scanline(int subimage, int miplevel, int y, int /*z*/,
 bool
 HdrInput::close()
 {
-    // if (m_io_local) {
-    //     // If we allocated our own ioproxy, close it.
-    //     ioproxy_clear();
-    // }
-
     init();  // Reset to initial state
     return true;
 }

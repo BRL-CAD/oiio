@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # This script is run when CI system first starts up.
 # Since it sets many env variables needed by the caller, it should be run
@@ -50,7 +50,7 @@ export LD_LIBRARY_PATH=${LOCAL_DEPS_DIR}/dist/lib:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=${LOCAL_DEPS_DIR}/dist/lib64:$LD_LIBRARY_PATH
 export DYLD_LIBRARY_PATH=${LOCAL_DEPS_DIR}/dist/lib:$DYLD_LIBRARY_PATH
 
-export OCIO="$PWD/testsuite/common/OpenColorIO/nuke-default/config.ocio"
+# export OCIO="$PWD/testsuite/common/OpenColorIO/nuke-default/config.ocio"
 export TESTSUITE_CLEANUP_ON_SUCCESS=${TESTSUITE_CLEANUP_ON_SUCCESS:=1}
 
 mkdir -p build dist

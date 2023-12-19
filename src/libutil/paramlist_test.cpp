@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <limits>
@@ -104,7 +104,16 @@ test_value_types()
         const char* val = "hello";
         ParamValue p("name", val);
         OIIO_CHECK_EQUAL(p.get<ustring>(), "hello");
+        OIIO_CHECK_EQUAL(p.get_ustring(), "hello");
         OIIO_CHECK_EQUAL(p.get_string(), "hello");
+    }
+
+    {
+        ustringhash val("hello");
+        ParamValue p("name", val);
+        OIIO_CHECK_EQUAL(p.get_string(), "hello");
+        OIIO_CHECK_EQUAL(p.get_ustring(), "hello");
+        OIIO_CHECK_EQUAL(p.get<ustringhash>(), val);
     }
 
     {
@@ -265,6 +274,7 @@ test_paramlist()
     OIIO_CHECK_EQUAL(pl.get_int("bar"), 0);
     OIIO_CHECK_EQUAL(pl.get_int("bar"), 0);
     OIIO_CHECK_EQUAL(pl.get_string("bar"), "barbarbar?");
+    OIIO_CHECK_EQUAL(pl.get_string("foo"), "42");
     OIIO_CHECK_ASSERT(pl.find("foo") != pl.cend());
     OIIO_CHECK_ASSERT(pl.find("Foo") == pl.cend());
     OIIO_CHECK_ASSERT(pl.find("Foo", TypeDesc::UNKNOWN, false) != pl.cend());

@@ -1,6 +1,6 @@
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio/
+# https://github.com/AcademySoftwareFoundation/OpenImageIO/
 
 include (CTest)
 
@@ -69,7 +69,8 @@ macro (oiio_add_tests)
             set (_test_disabled 1)
         endif ()
     endforeach ()
-    if (0 AND OpenColorIO_VERSION VERSION_GREATER_EQUAL 2.2)
+    if (OpenColorIO_VERSION VERSION_GREATER_EQUAL 2.2
+          AND NOT (OIIO_DISABLE_BUILTIN_OCIO_CONFIGS OR "$ENV{OIIO_DISABLE_BUILTIN_OCIO_CONFIGS}"))
         # For OCIO 2.2+, have the testsuite use the default built-in config
         list (APPEND _ats_ENVIRONMENT "OCIO=ocio://default"
                                       "OIIO_TESTSUITE_OCIOCONFIG=ocio://default")
@@ -124,9 +125,7 @@ macro (oiio_add_tests)
             endif()
 
         endforeach ()
-        if (VERBOSE)
-           message (STATUS "TESTS: ${_ats_UNPARSED_ARGUMENTS}")
-        endif ()
+        message (VERBOSE "TESTS: ${_ats_UNPARSED_ARGUMENTS}")
     endif ()
 endmacro ()
 
@@ -140,6 +139,7 @@ macro (oiio_add_all_tests)
     # Freestanding tests:
     oiio_add_tests (
                     cmake-consumer
+                    docs-examples-cpp
                     iinfo igrep
                     nonwhole-tiles
                     oiiotool
@@ -185,6 +185,7 @@ macro (oiio_add_all_tests)
                     texture-stats
                     texture-threadtimes
                     texture-env
+                    texture-colorspace
                    )
     oiio_add_tests (${all_texture_tests})
     # Duplicate texture tests with batch mode
@@ -208,6 +209,7 @@ macro (oiio_add_all_tests)
     # libraries to run correctly.
     if (USE_PYTHON AND NOT BUILD_OIIOUTIL_ONLY AND NOT SANITIZE)
         oiio_add_tests (
+            docs-examples-python
             python-colorconfig
             python-deep 
             python-imagebuf
@@ -274,12 +276,18 @@ macro (oiio_add_all_tests)
     set (all_openexr_tests
          openexr-suite openexr-multires openexr-chroma
          openexr-v2 openexr-window perchannel oiiotool-deep)
+    if (OpenEXR_VERSION VERSION_GREATER_EQUAL 3.1.10)
+        # OpenEXR 3.1.10 is the first release where the exr core library
+        # properly supported all compression types (DWA in particular).
+        list (APPEND all_openexr_tests openexr-compression)
+    endif ()
+    # Run all OpenEXR tests without core library
     oiio_add_tests (${all_openexr_tests}
                     ENVIRONMENT OPENIMAGEIO_OPTIONS=openexr:core=0
                     IMAGEDIR openexr-images
                     URL http://github.com/AcademySoftwareFoundation/openexr-images)
+    # For OpenEXR >= 3.1, be sure to test with the core option on
     if (OpenEXR_VERSION VERSION_GREATER_EQUAL 3.1)
-        # For OpenEXR >= 3.1, be sure to test with the core option on
         oiio_add_tests (${all_openexr_tests}
                         SUFFIX ".core"
                         ENVIRONMENT OPENIMAGEIO_OPTIONS=openexr:core=1
@@ -360,18 +368,15 @@ function (oiio_get_test_data name)
     if (IS_DIRECTORY "${OIIO_LOCAL_TESTDATA_ROOT}/${name}"
         AND NOT EXISTS "${CMAKE_BINARY_DIR}/testsuite/${name}")
         set (_ogtd_LINK_RESULT "")
-        if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.14)
-            # Just make a link if we can
-            message (STATUS "Linking ${name} from ${OIIO_LOCAL_TESTDATA_ROOT}/${name}")
-            file (CREATE_LINK "${OIIO_LOCAL_TESTDATA_ROOT}/${name}"
-                              "${CMAKE_BINARY_DIR}/testsuite/${name}"
-                              SYMBOLIC RESULT _ogtd_LINK_RESULT)
-            # Note: Using 'COPY_ON_ERROR' in the above command should have prevented the need to
-            # have the manual fall-back below. However, there's been at least one case where a user
-            # noticed that copying did not happen if creating the link failed (CMake 3.24). We can
-            # adjust this in the future if CMake behavior improves.
-            message (STATUS "Link result ${_ogtd_LINK_RESULT}")
-        endif ()
+        message (STATUS "Linking ${name} from ${OIIO_LOCAL_TESTDATA_ROOT}/${name}")
+        file (CREATE_LINK "${OIIO_LOCAL_TESTDATA_ROOT}/${name}"
+                          "${CMAKE_BINARY_DIR}/testsuite/${name}"
+                          SYMBOLIC RESULT _ogtd_LINK_RESULT)
+        # Note: Using 'COPY_ON_ERROR' in the above command should have prevented the need to
+        # have the manual fall-back below. However, there's been at least one case where a user
+        # noticed that copying did not happen if creating the link failed (CMake 3.24). We can
+        # adjust this in the future if CMake behavior improves.
+        message (VERBOSE "Link result ${_ogtd_LINK_RESULT}")
         if (NOT _ogtd_LINK_RESULT EQUAL 0)
             # Older cmake or failure to link -- copy
             message (STATUS "Copying ${name} from ${OIIO_LOCAL_TESTDATA_ROOT}/${name}")
@@ -401,7 +406,7 @@ endfunction()
 
 function (oiio_setup_test_data)
     oiio_get_test_data (oiio-images
-                        REPO https://github.com/OpenImageIO/oiio-images.git)
+                        REPO https://github.com/AcademySoftwareFoundation/OpenImageIO-images.git)
     oiio_get_test_data (openexr-images
                         REPO https://github.com/AcademySoftwareFoundation/openexr-images.git
                         BRANCH main)

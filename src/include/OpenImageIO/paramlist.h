@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 /// \file
@@ -109,6 +109,11 @@ public:
     ParamValue(string_view _name, string_view value) noexcept
         : ParamValue(_name, ustring(value))
     {
+    }
+    ParamValue(string_view _name, ustringhash value) noexcept
+    {
+        init_noclear(ustring(_name), TypeDesc::USTRINGHASH, 1, &value,
+                     Copy(true));
     }
 
     // Set from string -- parse

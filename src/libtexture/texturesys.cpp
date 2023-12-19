@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 #include <cmath>
@@ -12,6 +12,7 @@
 
 #include <OpenImageIO/Imath.h>
 
+#include <OpenImageIO/color.h>
 #include <OpenImageIO/dassert.h>
 #include <OpenImageIO/filter.h>
 #include <OpenImageIO/fmath.h>
@@ -570,6 +571,36 @@ TextureSystemImpl::resolve_filename(const std::string& filename) const
 
 
 
+int
+TextureSystemImpl::get_colortransform_id(ustring fromspace,
+                                         ustring tospace) const
+{
+    const ColorConfig& cc(ColorConfig::default_colorconfig());
+    if (tospace.empty())
+        tospace = m_imagecache->colorspace();
+    if (fromspace.empty())
+        return 0;  // null transform
+    int from = cc.getColorSpaceIndex(fromspace);
+    int to   = cc.getColorSpaceIndex(tospace);
+    if (from < 0 || to < 0)
+        return -1;  // unknown color space
+    if (from == to || cc.equivalent(fromspace, tospace))
+        return 0;                          // null transform
+    return ((from + 1) << 16) | (to + 1);  // mash the indices together
+    // Note: we add 1 to the indices so that 0 can be the null transform
+}
+
+
+
+int
+TextureSystemImpl::get_colortransform_id(ustringhash fromspace,
+                                         ustringhash tospace) const
+{
+    return get_colortransform_id(ustring(fromspace), ustring(tospace));
+}
+
+
+
 bool
 TextureSystemImpl::get_texture_info(ustring filename, int subimage,
                                     ustring dataname, TypeDesc datatype,
@@ -806,7 +837,7 @@ TextureSystemImpl::get_texels(TextureHandle* texture_handle_,
         tile_chend   = chbegin + actualchannels;
     }
     TileID tileid(*texfile, subimage, miplevel, 0, 0, 0, tile_chbegin,
-                  tile_chend);
+                  tile_chend, options.colortransformid);
     size_t formatchannelsize = format.size();
     size_t formatpixelsize   = nchannels * formatchannelsize;
     size_t scanlinesize      = (xend - xbegin) * formatpixelsize;
@@ -1193,7 +1224,8 @@ TextureSystemImpl::texture(TextureHandle* texture_handle_,
         options.twrap = TextureOpt::WrapPeriodicPow2;
 
     if (subinfo.is_constant_image && options.swrap != TextureOpt::WrapBlack
-        && options.twrap != TextureOpt::WrapBlack) {
+        && options.twrap != TextureOpt::WrapBlack
+        && options.colortransformid <= 0) {
         // Lookup of constant color texture, non-black wrap -- skip all the
         // hard stuff.
         for (int c = 0; c < actualchannels; ++c)
@@ -1313,6 +1345,7 @@ TextureSystemImpl::texture(TextureHandle* texture_handle,
     opt.conservative_filter = options.conservative_filter;
     opt.fill                = options.fill;
     opt.missingcolor        = options.missingcolor;
+    opt.colortransformid    = options.colortransformid;
     // rwrap not needed for 2D texture
 
     bool ok          = true;
@@ -2104,7 +2137,7 @@ TextureSystemImpl::sample_closest(
         tile_chend   = options.firstchannel + actualchannels;
     }
     TileID id(texturefile, options.subimage, miplevel, 0, 0, 0, tile_chbegin,
-              tile_chend);
+              tile_chend, options.colortransformid);
     for (int sample = 0; sample < nsamples; ++sample) {
         float s = s_[sample], t = t_[sample];
         float weight = weight_[sample];
@@ -2249,7 +2282,7 @@ TextureSystemImpl::sample_bilinear(
         tile_chend   = options.firstchannel + actualchannels;
     }
     TileID id(texturefile, options.subimage, miplevel, 0, 0, 0, tile_chbegin,
-              tile_chend);
+              tile_chend, options.colortransformid);
     float nonfill = 0.0f;  // The degree to which we DON'T need fill
     // N.B. What's up with "nofill"? We need to consider fill only when we
     // are inside the valid texture region. Outside, i.e. in the black wrap
@@ -2607,7 +2640,7 @@ TextureSystemImpl::sample_bicubic(
         tile_chend   = options.firstchannel + actualchannels;
     }
     TileID id(texturefile, options.subimage, miplevel, 0, 0, 0, tile_chbegin,
-              tile_chend);
+              tile_chend, options.colortransformid);
     int pixelsize                         = channelsize * id.nchannels();
     imagesize_t firstchannel_offset_bytes = channelsize
                                             * (firstchannel - id.chbegin());
@@ -3116,8 +3149,120 @@ TextureSystemImpl::unit_test_texture()
     }
 }
 
-
-
 }  // end namespace pvt
+
+
+
+void
+TextureSystem::unit_test_hash()
+{
+#ifndef OIIO_CODE_COVERAGE
+    std::vector<size_t> fourbits(1 << 4, 0);
+    std::vector<size_t> eightbits(1 << 8, 0);
+    std::vector<size_t> sixteenbits(1 << 16, 0);
+    std::vector<size_t> highereightbits(1 << 8, 0);
+
+    const size_t iters = 1000000;
+    const int res      = 4 * 1024;  // Simulate tiles from a 4k image
+    const int tilesize = 64;
+    const int nfiles   = iters / ((res / tilesize) * (res / tilesize));
+    Strutil::print("Testing hashing with {} files of {}x{} with {}x{} tiles:",
+                   nfiles, res, res, tilesize, tilesize);
+
+    ImageCache* imagecache = ImageCache::create();
+
+    // Set up the ImageCacheFiles outside of the timing loop
+    using OIIO::pvt::ImageCacheFile;
+    using OIIO::pvt::ImageCacheFileRef;
+    using OIIO::pvt::ImageCacheImpl;
+    std::vector<ImageCacheFileRef> icf;
+    for (int f = 0; f < nfiles; ++f) {
+        ustring filename = ustring::fmtformat("{:06}.tif", f);
+        icf.push_back(
+            new ImageCacheFile(*(ImageCacheImpl*)imagecache, NULL, filename));
+    }
+
+    // First, just try to do raw timings of the hash
+    Timer timer;
+    size_t i = 0, hh = 0;
+    for (int f = 0; f < nfiles; ++f) {
+        for (int y = 0; y < res; y += tilesize) {
+            for (int x = 0; x < res; x += tilesize, ++i) {
+                OIIO::pvt::TileID id(*icf[f], 0, 0, x, y, 0, 0, 1);
+                size_t h = id.hash();
+                hh += h;
+            }
+        }
+    }
+    Strutil::print("hh = {}\n", hh);
+    double time = timer();
+    double rate = (i / 1.0e6) / time;
+    Strutil::print("Hashing rate:` {:3.2f} Mhashes/sec\n", rate);
+
+    // Now, check the quality of the hash by looking at the low 4, 8, and
+    // 16 bits and making sure that they divide into hash buckets fairly
+    // evenly.
+    i = 0;
+    for (int f = 0; f < nfiles; ++f) {
+        for (int y = 0; y < res; y += tilesize) {
+            for (int x = 0; x < res; x += tilesize, ++i) {
+                OIIO::pvt::TileID id(*icf[f], 0, 0, x, y, 0, 0, 1);
+                size_t h = id.hash();
+                ++fourbits[h & 0xf];
+                ++eightbits[h & 0xff];
+                ++highereightbits[(h >> 24) & 0xff];
+                ++sixteenbits[h & 0xffff];
+                // if (i < 16) Strutil::print({:x}\n", h);
+            }
+        }
+    }
+
+    size_t min, max;
+    min = std::numeric_limits<size_t>::max();
+    max = 0;
+    for (int i = 0; i < 16; ++i) {
+        if (fourbits[i] < min)
+            min = fourbits[i];
+        if (fourbits[i] > max)
+            max = fourbits[i];
+    }
+    Strutil::print("4-bit hash buckets range from {} to {}\n", min, max);
+
+    min = std::numeric_limits<size_t>::max();
+    max = 0;
+    for (int i = 0; i < 256; ++i) {
+        if (eightbits[i] < min)
+            min = eightbits[i];
+        if (eightbits[i] > max)
+            max = eightbits[i];
+    }
+    Strutil::print("8-bit hash buckets range from {} to {}\n", min, max);
+
+    min = std::numeric_limits<size_t>::max();
+    max = 0;
+    for (int i = 0; i < 256; ++i) {
+        if (highereightbits[i] < min)
+            min = highereightbits[i];
+        if (highereightbits[i] > max)
+            max = highereightbits[i];
+    }
+    Strutil::print("higher 8-bit hash buckets range from {} to {}\n", min, max);
+
+    min = std::numeric_limits<size_t>::max();
+    max = 0;
+    for (int i = 0; i < (1 << 16); ++i) {
+        if (sixteenbits[i] < min)
+            min = sixteenbits[i];
+        if (sixteenbits[i] > max)
+            max = sixteenbits[i];
+    }
+    Strutil::print("16-bit hash buckets range from {} to {}\n", min, max);
+
+    Strutil::print("\n");
+
+    ImageCache::destroy(imagecache);
+#endif
+}
+
 
 OIIO_NAMESPACE_END

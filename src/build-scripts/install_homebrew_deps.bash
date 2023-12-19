@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # This script, which assumes it is running on a Mac OSX with Homebrew
 # installed, does a "brew install" in all packages reasonably needed by
@@ -42,8 +42,12 @@ brew install --display-times -q freetype libraw dcmtk pybind11 numpy || true
 brew install --display-times -q ffmpeg libheif ptex || true
 brew install --display-times -q tbb || true
 brew install --display-times -q openvdb || true
-brew install --display-times -q opencv || true
-brew install --display-times -q qt${QT_VERSION}
+if [[ "${USE_OPENCV}" != "0" ]] ; then
+    brew install --display-times -q opencv || true
+fi
+if [[ "${USE_QT}" != "0" ]] ; then
+    brew install --display-times -q qt${QT_VERSION}
+fi
 
 echo ""
 echo "After brew installs:"

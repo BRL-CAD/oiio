@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #include "py_oiio.h"
 #include <OpenImageIO/color.h>
@@ -25,6 +25,12 @@ declare_colorconfig(py::module& m)
         .def("getNumColorSpaces", &ColorConfig::getNumColorSpaces)
         .def("getColorSpaceNames", &ColorConfig::getColorSpaceNames)
         .def("getColorSpaceNameByIndex", &ColorConfig::getColorSpaceNameByIndex)
+        .def(
+            "getColorSpaceIndex",
+            [](const ColorConfig& self, const std::string& name) {
+                return self.getColorSpaceIndex(name);
+            },
+            "name"_a)
         .def(
             "getColorSpaceNameByRole",
             [](const ColorConfig& self, const std::string& role) {
@@ -110,6 +116,19 @@ declare_colorconfig(py::module& m)
              [](const ColorConfig& self, const std::string& str) {
                  return std::string(self.parseColorSpaceFromString(str));
              })
+        .def(
+            "resolve",
+            [](const ColorConfig& self, const std::string& name) {
+                return std::string(self.resolve(name));
+            },
+            "name"_a)
+        .def(
+            "equivalent",
+            [](const ColorConfig& self, const std::string& color_space,
+               const std::string& other_color_space) {
+                return self.equivalent(color_space, other_color_space);
+            },
+            "color_space"_a, "other_color_space"_a)
         .def("configname", &ColorConfig::configname);
 
     m.attr("supportsOpenColorIO")     = ColorConfig::supportsOpenColorIO();

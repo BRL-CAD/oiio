@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 # Make two images that differ by a particular known pixel value
@@ -19,6 +19,7 @@ command += oiiotool("-pdiff img1.exr img2.exr")
 command += oiiotool("-pdiff img1.exr img1.exr")
 command += diff_command("img1.exr", "img2.exr", extraargs="-p")
 command += diff_command("img1.exr", "img1.exr", extraargs="-p")
+command += diff_command("img1.exr", "img2.exr", extraargs="-p -fail 1")
 
 
 # Outputs to check against references

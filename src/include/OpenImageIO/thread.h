@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 // clang-format off
 
@@ -112,11 +112,19 @@ pause(int delay) noexcept
 
 #elif defined(_MSC_VER)
     for (int i = 0; i < delay; ++i) {
-#    if defined(_WIN64)
-        YieldProcessor();
-#    else
+        // A reimplementation of winnt.h YieldProcessor,
+        // to avoid including windows headers.
+        #if defined(_M_AMD64)
+        _mm_pause();
+        #elif defined(_M_ARM64) || defined(_M_HYBRID_X86_ARM64)
+        __dmb(_ARM64_BARRIER_ISHST);
+        __yield();
+        #elif defined(_M_ARM)
+        __dmb(_ARM_BARRIER_ISHST);
+        __yield();
+        #else
         _asm pause
-#    endif /* _WIN64 */
+        #endif
     }
 
 #else
@@ -762,10 +770,18 @@ private:
 
 
 /// Return a reference to the "default" shared thread pool. In almost all
-/// ordinary circumstances, you should use this exclusively to get a
-/// single shared thread pool, since creating multiple thread pools
-/// could result in hilariously over-threading your application.
-OIIO_UTIL_API thread_pool* default_thread_pool ();
+/// ordinary circumstances, you should use this exclusively to get a single
+/// shared thread pool, since creating multiple thread pools could result in
+/// hilariously over-threading your application. Note that this call may
+/// (safely, and only once) trigger creation of the thread pool and its
+/// worker threads if it has not yet been created.
+OIIO_UTIL_API thread_pool* default_thread_pool();
+
+/// If a thread pool has been created, this call will safely terminate its
+/// worker threads. This should presumably be called by an application
+/// immediately before it exists, when it is confident the thread pool will
+/// no longer be needed.
+OIIO_UTIL_API void default_thread_pool_shutdown();
 
 
 

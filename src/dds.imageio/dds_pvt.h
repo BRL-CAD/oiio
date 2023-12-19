@@ -1,9 +1,13 @@
 // Copyright Contributors to the OpenImageIO project.
 // SPDX-License-Identifier: Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #pragma once
 
+
+// Some documentation for the DDS format:
+// https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-pguide
+// https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-reference
 
 OIIO_PLUGIN_NAMESPACE_BEGIN
 

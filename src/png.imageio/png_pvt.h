@@ -1,6 +1,6 @@
 // Copyright Contributors to the OpenImageIO project.
-// SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-// https://github.com/OpenImageIO/oiio
+// SPDX-License-Identifier: Apache-2.0
+// https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 #pragma once
 
@@ -718,6 +718,27 @@ write_row(png_structp& sp, png_byte* data)
         return false;
     }
     png_write_row(sp, data);
+    return true;
+}
+
+
+
+/// Write scanlines
+inline bool
+write_rows(png_structp& sp, png_byte* data, int nrows = 0, stride_t ystride = 0)
+{
+    if (setjmp(png_jmpbuf(sp))) {  // NOLINT(cert-err52-cpp)
+        //error ("PNG library error");
+        return false;
+    }
+    if (nrows == 1) {
+        png_write_row(sp, data);
+    } else {
+        png_byte** ptrs = OIIO_ALLOCA(png_byte*, nrows);
+        for (int i = 0; i < nrows; ++i)
+            ptrs[i] = data + i * ystride;
+        png_write_rows(sp, ptrs, png_uint_32(nrows));
+    }
     return true;
 }
 

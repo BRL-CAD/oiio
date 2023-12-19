@@ -3,7 +3,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 
 set -ex
@@ -18,8 +18,12 @@ if [[ "$ASWF_ORG" != ""  ]] ; then
     #ls /etc/yum.repos.d
 
     sudo yum install -y giflib giflib-devel && true
-    sudo yum install -y opencv opencv-devel && true
-    sudo yum install -y ffmpeg ffmpeg-devel && true
+    if [[ "${USE_OPENCV}" != "0" ]] ; then
+        sudo yum install -y opencv opencv-devel && true
+    fi
+    if [[ "${USE_FFMPEG}" != "0" ]] ; then
+        sudo yum install -y ffmpeg ffmpeg-devel && true
+    fi
     if [[ "${EXTRA_DEP_PACKAGES}" != "" ]] ; then
         time sudo yum install -y ${EXTRA_DEP_PACKAGES}
     fi
@@ -138,6 +142,9 @@ else
 
 fi
 
+if [[ "$CMAKE_VERSION" != "" ]] ; then
+    source src/build-scripts/build_cmake.bash
+fi
 cmake --version
 
 
@@ -188,6 +195,14 @@ fi
 
 if [[ "$PTEX_VERSION" != "" ]] ; then
     source src/build-scripts/build_Ptex.bash
+fi
+
+if [[ "$ABI_CHECK" != "" ]] ; then
+    source src/build-scripts/build_abi_tools.bash
+fi
+
+if [[ "$LIBJPEGTURBO_VERSION" != "" ]] ; then
+    source src/build-scripts/build_libjpeg-turbo.bash
 fi
 
 if [[ "$USE_ICC" != "" ]] ; then

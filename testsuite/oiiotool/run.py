@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 # Copyright Contributors to the OpenImageIO project.
-# SPDX-License-Identifier: BSD-3-Clause and Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# SPDX-License-Identifier: Apache-2.0
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 # Create some test images we need
 command += oiiotool ("--create 320x240 3 -d uint8 -o black.tif")
@@ -68,6 +68,14 @@ command += oiiotool ("../common/tahoe-small.tif --invert -o invert.tif")
 command += oiiotool ("grey128.exr --powc 2 -o cpow1.exr")
 # Test --powc val,val,val... (per-channel powers)
 command += oiiotool ("grey128.exr --powc 2,2,1 -o cpow2.exr")
+
+# Test --normalize
+command += oiiotool ("src/norm.exr --normalize -o normalize.exr " +
+                     "src/norm.exr --normalize:scale=0.5 -o normalize_scale.exr " +
+                     "src/normoffset.exr --normalize:incenter=0.5 -o normalize_offsetin.exr " +
+                     "src/norm.exr --normalize:outcenter=0.5:scale=0.5 -o normalize_offsetscaleout.exr " +
+                     "src/normoffset.exr --normalize:incenter=0.5:outcenter=0.5:scale=0.5 -o normalize_offsetscale.exr ")
+
 
 # Test --abs, --absdiff, --absdiffc
 # First, make a test image that's 0.5 on the left, -0.5 on the right
@@ -214,8 +222,8 @@ command += oiiotool ("subimages-2.exr --sisplit -o subimage2.exr " +
 command += oiiotool ("subimages-4.exr -cmul:subimages=0,2 0.5 -o subimage-individual.exr")
 
 # Test --printstats
-command += oiiotool ("../common/tahoe-tiny.tif --echo \"--printstats:\" --printstats")
-command += oiiotool ("../common/tahoe-tiny.tif --printstats:window=10x10+50+50 --echo \" \"")
+command += oiiotool ("../common/tahoe-tiny.tif --echo \"--printstats:\" --printstats:native=1")
+command += oiiotool ("../common/tahoe-tiny.tif --printstats:natve=1:window=10x10+50+50 --echo \" \"")
 
 # test --iconfig
 command += oiiotool ("--info -v -metamatch Debug --iconfig oiio:DebugOpenConfig! 1 " +
@@ -263,6 +271,8 @@ outputs = [
             "div.exr", "divc1.exr", "divc2.exr",
             "mad.exr", "invert.tif",
             "cpow1.exr", "cpow2.exr",
+            "normalize.exr", "normalize_scale.exr", "normalize_offsetin.exr",
+            "normalize_offsetscaleout.exr", "normalize_offsetscale.exr",
             "abs.exr", "absdiff.exr", "absdiffc.exr",
             "chsum.tif",
             "rgbahalf-zfloat.exr",

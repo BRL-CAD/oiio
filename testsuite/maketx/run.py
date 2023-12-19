@@ -2,7 +2,7 @@
 
 # Copyright Contributors to the OpenImageIO project.
 # SPDX-License-Identifier: Apache-2.0
-# https://github.com/OpenImageIO/oiio
+# https://github.com/AcademySoftwareFoundation/OpenImageIO
 
 failureok = 1
 
@@ -153,12 +153,17 @@ command += maketx_command ("checker.tif", "checker-attribs.tx",
                            "--attrib sname2 sval2 ",
                            showinfo = True)
 
+# Test --colorconvert and --unpremult
+command += oiiotool (" --pattern constant:color=.25,.25,.25,.5 64x64 4 "
+                    + " -d uint8 -o " + make_relpath("gray64srgb.tif"))
+command += maketx_command ("gray64srgb.tif", "gray64linsrgb.tx",
+                           "--colorconvert srgb lin_srgb --unpremult")
 
 outputs += [ "out.txt" ]
 
 
 
 # To do:  --fullpixels
-#         --prman-metadata --ignore-unassoc
+#         --ignore-unassoc
 #         --mipimage 
-#         --colorconvert --unpremult -u --fovcot
+#         --fovcot
