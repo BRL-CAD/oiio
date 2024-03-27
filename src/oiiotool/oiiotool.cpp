@@ -423,7 +423,7 @@ Oiiotool::remember_input_channelformats(ImageRecRef img)
         // Overall default format is the merged type of all subimages
         // of the first input image.
         input_dataformat         = TypeDesc::basetype_merge(input_dataformat,
-                                                    nspec.format);
+                                                            nspec.format);
         std::string subimagename = nspec.get_string_attribute(
             "oiio:subimagename");
         if (subimagename.size()) {
@@ -447,7 +447,7 @@ Oiiotool::remember_input_channelformats(ImageRecRef img)
                 if (input_channelformats[subchname] == "")
                     input_channelformats[subchname] = chtypename;
             } else {
-                if (input_channelformats[chname] != "")
+                if (input_channelformats[chname] == "")
                     input_channelformats[chname] = chtypename;
             }
         }
@@ -768,39 +768,23 @@ set_output_dataformat(ImageSpec& spec, TypeDesc format,
                       std::map<std::string, std::string>& channelformats,
                       int bitdepth)
 {
-    // Account for default requested format
     if (format != TypeUnknown)
         spec.format = format;
-    if (bitdepth)
-        spec.attribute("oiio:BitsPerSample", bitdepth);
-    else
-        spec.erase_attribute("oiio:BitsPerSample");
-
-    // See if there's a recommended format for this subimage
-    std::string subimagename = spec["oiio:subimagename"];
-    if (format == TypeUnknown && subimagename.size()) {
-        auto key = Strutil::fmt::format("{}.*", subimagename);
-        if (channelformats[key] != "")
-            spec.format = TypeDesc(channelformats[key]);
-    }
-
-    // Honor any per-channel requests
-    if (channelformats.size()) {
-        spec.channelformats.clear();
-        spec.channelformats.resize(spec.nchannels, spec.format);
+    spec.channelformats.resize(spec.nchannels, spec.format);
+    if (!channelformats.empty()) {
+        std::string subimagename = spec["oiio:subimagename"];
         for (int c = 0; c < spec.nchannels; ++c) {
             std::string chname = spec.channel_name(c);
             auto subchname     = Strutil::fmt::format("{}.{}", subimagename,
-                                                  chname);
-            if (channelformats[subchname] != "" && subimagename.size())
-                spec.channelformats[c] = TypeDesc(channelformats[subchname]);
+                                                      chname);
+            TypeDesc chtype    = spec.channelformat(c);
+            if (subimagename.size() && channelformats[subchname] != "")
+                chtype = TypeDesc(channelformats[subchname]);
             else if (channelformats[chname] != "")
-                spec.channelformats[c] = TypeDesc(channelformats[chname]);
-            else
-                spec.channelformats[c] = spec.format;
+                chtype = TypeDesc(channelformats[chname]);
+            if (chtype != TypeUnknown)
+                spec.channelformats[c] = chtype;
         }
-    } else {
-        spec.channelformats.clear();
     }
 
     // Eliminate the per-channel formats if they are all the same.
@@ -813,6 +797,11 @@ set_output_dataformat(ImageSpec& spec, TypeDesc format,
             spec.channelformats.clear();
         }
     }
+
+    if (bitdepth)
+        spec.attribute("oiio:BitsPerSample", bitdepth);
+    else
+        spec.erase_attribute("oiio:BitsPerSample");
 }
 
 
@@ -839,37 +828,71 @@ adjust_output_options(string_view filename, ImageSpec& spec,
     //   format as the input, or else she would have said so).
     // * Otherwise, just write the buffer's format, regardless of how it got
     //   that way.
-    TypeDesc requested_output_dataformat = ot.output_dataformat;
-    auto requested_output_channelformats = ot.output_channelformats;
+
+    // spec is what we're going to use for output.
+
+    // Accumulating results here
+    TypeDesc requested_output_dataformat;
+    std::map<std::string, std::string> requested_channelformats;
+    int requested_output_bits = 0;
+
+    if (was_direct_read && nativespec) {
+        // If the image we're outputting is an unmodified direct read of a
+        // file, assume that we'll default to outputting the same channel
+        // formats it started in.
+        requested_output_dataformat = nativespec->format;
+        for (int c = 0; c < nativespec->nchannels; ++c) {
+            requested_channelformats[nativespec->channel_name(c)]
+                = nativespec->channelformat(c).c_str();
+        }
+        requested_output_bits = nativespec->get_int_attribute(
+            "oiio:BitsPerSample");
+    } else if (ot.input_dataformat != TypeUnknown) {
+        // If the image we're outputting is a computed or modified image, not
+        // a direct read, then assume that the FIRST image we read in provides
+        // a template for the output we want (if we ever read an image).
+        requested_output_dataformat = ot.input_dataformat;
+        requested_channelformats    = ot.input_channelformats;
+        requested_output_bits       = ot.input_bitspersample;
+    }
+
+    // Any "global" format requests set by -d override the above.
+    if (ot.output_dataformat != TypeUnknown) {
+        // `-d type` clears the board and imposes the request
+        requested_output_dataformat = ot.output_dataformat;
+        requested_channelformats.clear();
+        spec.channelformats.clear();
+        if (ot.output_bitspersample)
+            requested_output_bits = ot.output_bitspersample;
+    }
+    if (!ot.output_channelformats.empty()) {
+        // `-d chan=type` overrides the format for a specific channel
+        for (auto&& c : ot.output_channelformats)
+            requested_channelformats[c.first] = c.second;
+    }
+
+    // Any override options on the -o command itself take precedence over
+    // everything else.
     if (fileoptions.contains("type")) {
         requested_output_dataformat.fromstring(fileoptions.get_string("type"));
-        requested_output_channelformats.clear();
+        requested_channelformats.clear();
+        spec.channelformats.clear();
     } else if (fileoptions.contains("datatype")) {
         requested_output_dataformat.fromstring(
             fileoptions.get_string("datatype"));
-        requested_output_channelformats.clear();
+        requested_channelformats.clear();
+        spec.channelformats.clear();
     }
-    int requested_output_bits = fileoptions.get_int("bits",
-                                                    ot.output_bitspersample);
+    requested_output_bits = fileoptions.get_int("bits", requested_output_bits);
 
-    if (requested_output_dataformat != TypeUnknown) {
-        // Requested an explicit override of datatype
-        set_output_dataformat(spec, requested_output_dataformat,
-                              requested_output_channelformats,
-                              requested_output_bits);
-    } else if (was_direct_read && nativespec) {
-        // Do nothing -- use the file's native data format
-        spec.channelformats = nativespec->channelformats;
-        set_output_dataformat(spec, nativespec->format,
-                              requested_output_channelformats,
-                              (*nativespec)["oiio:BitsPerSample"].get<int>());
-    } else if (ot.input_dataformat != TypeUnknown) {
-        auto mergedlist = ot.input_channelformats;
-        for (auto& c : requested_output_channelformats)
-            mergedlist[c.first] = c.second;
-        set_output_dataformat(spec, ot.input_dataformat, mergedlist,
-                              ot.input_bitspersample);
-    }
+    // At this point, the trio of "requested" variable reflect any global or
+    // command requests to override the logic of what was found in the input
+    // files.
+
+    // Set the types in the spec
+    set_output_dataformat(spec, requested_output_dataformat,
+                          requested_channelformats, requested_output_bits);
+
 
     // Tiling strategy:
     // * If a specific request was made for tiled or scanline output, honor
@@ -3250,7 +3273,7 @@ action_chappend(Oiiotool& ot, cspan<const char*> argv)
     std::string command = ot.express(argv[0]);
     auto options        = ot.extract_options(command);
     int n               = OIIO::clamp(options["n"].get<int>(2), 2,
-                        int(ot.image_stack.size() + 1));
+                                      int(ot.image_stack.size() + 1));
     command             = remove_modifier(command, "n");
     bool ok             = true;
 
@@ -3444,7 +3467,7 @@ action_subimage_append(Oiiotool& ot, cspan<const char*> argv)
     OTScopedTimer timer(ot, command);
     auto options = ot.extract_options(command);
     int n        = OIIO::clamp(options["n"].get<int>(2), 2,
-                        int(ot.image_stack.size() + 1));
+                               int(ot.image_stack.size() + 1));
 
     action_subimage_append_n(ot, n, command);
 }
@@ -4648,7 +4671,7 @@ action_pixelaspect(Oiiotool& ot, cspan<const char*> argv)
     if (scale_full_width != Aspec->full_width
         || scale_full_height != Aspec->full_height) {
         std::string resize  = format_resolution(scale_full_width,
-                                               scale_full_height, 0, 0);
+                                                scale_full_height, 0, 0);
         std::string command = "resize";
         if (filtername.size())
             command += Strutil::fmt::format(":filter={}", filtername);
@@ -5826,10 +5849,10 @@ output_file(Oiiotool& ot, cspan<const char*> argv)
         roi.zend           = std::max(roi.zbegin + 1, roi.zend);
         std::string crop   = (ir->spec(0, 0)->depth == 1)
                                  ? format_resolution(roi.width(), roi.height(),
-                                                   roi.xbegin, roi.ybegin)
+                                                     roi.xbegin, roi.ybegin)
                                  : format_resolution(roi.width(), roi.height(),
-                                                   roi.depth(), roi.xbegin,
-                                                   roi.ybegin, roi.zbegin);
+                                                     roi.depth(), roi.xbegin,
+                                                     roi.ybegin, roi.zbegin);
         const char* argv[] = { "crop:allsubimages=1", crop.c_str() };
         void action_crop(Oiiotool & ot,
                          cspan<const char*> argv);  // forward decl
@@ -6357,9 +6380,43 @@ print_ocio_info(Oiiotool& ot, std::ostream& out)
 
 
 static void
+print_build_info(Oiiotool& ot, std::ostream& out)
+{
+    using Strutil::fmt::format;
+    int columns = Sysutil::terminal_columns() - 2;
+
+    auto platform = format("OIIO {} | {}", OIIO_VERSION_STRING,
+                           OIIO::get_string_attribute("build:platform"));
+    print("{}\n", Strutil::wordwrap(platform, columns, 4));
+
+    auto buildinfo = format("    Build compiler: {} | C++{}/{}",
+                            OIIO::get_string_attribute("build:compiler"),
+                            OIIO_CPLUSPLUS_VERSION, __cplusplus);
+    print("{}\n", Strutil::wordwrap(buildinfo, columns, 4));
+
+    auto hwbuildfeats
+        = format("    HW features enabled at build: {}",
+                 OIIO::get_string_attribute("build:simd", "no SIMD"));
+    print("{}\n", Strutil::wordwrap(hwbuildfeats, columns, 4));
+
+    std::string libs = OIIO::get_string_attribute("build:dependencies");
+    if (libs.size()) {
+        auto libvec = Strutil::splitsv(libs, ";");
+        for (auto& lib : libvec) {
+            size_t pos = lib.find(':');
+            lib.remove_prefix(pos + 1);
+        }
+        print(out, "{}\n",
+              Strutil::wordwrap("Dependencies: " + Strutil::join(libvec, ", "),
+                                columns, 4));
+    }
+}
+
+
+
+static void
 print_help_end(Oiiotool& ot, std::ostream& out)
 {
-    using Strutil::print;
     print(out, "\n");
     int columns = Sysutil::terminal_columns() - 2;
 
@@ -6375,36 +6432,16 @@ print_help_end(Oiiotool& ot, std::ostream& out)
     print(out, "    Run `oiiotool --colorconfiginfo` for a "
                "full color management inventory.\n");
 
-    std::vector<string_view> filternames;
-    for (int i = 0, e = Filter2D::num_filters(); i < e; ++i)
-        filternames.emplace_back(Filter2D::get_filterdesc(i).name);
     print(out, "{}\n",
           Strutil::wordwrap("Filters available: "
-                                + Strutil::join(filternames, ", "),
+                                + Strutil::replace(OIIO::get_string_attribute(
+                                                       "filter_list"),
+                                                   ";", ", ", true),
                             columns, 4));
 
-    std::string libs = OIIO::get_string_attribute("library_list");
-    if (libs.size()) {
-        auto libvec = Strutil::splitsv(libs, ";");
-        for (auto& lib : libvec) {
-            size_t pos = lib.find(':');
-            lib.remove_prefix(pos + 1);
-        }
-        print(out, "{}\n",
-              Strutil::wordwrap("Dependent libraries: "
-                                    + Strutil::join(libvec, ", "),
-                                columns, 4));
-    }
+    print_build_info(ot, out);
 
-    // Print the HW info
-    std::string buildsimd = OIIO::get_string_attribute("oiio:simd");
-    if (!buildsimd.size())
-        buildsimd = "no SIMD";
-    auto buildinfo = Strutil::fmt::format("OIIO {} built for C++{}/{} {}",
-                                          OIIO_VERSION_STRING,
-                                          OIIO_CPLUSPLUS_VERSION, __cplusplus,
-                                          buildsimd);
-    print("{}\n", Strutil::wordwrap(buildinfo, columns, 4));
+    // Print the current HW info
     auto hwinfo = Strutil::fmt::format("Running on {} cores {:.1f}GB {}",
                                        Sysutil::hardware_concurrency(),
                                        Sysutil::physical_memory()
@@ -6524,6 +6561,12 @@ Oiiotool::getargs(int argc, char* argv[])
       .help("Debug mode");
     ap.arg("--runstats", &ot.runstats)
       .help("Print runtime statistics");
+    ap.arg("--buildinfo")
+      .help("Print OIIO build information")
+      .action([&](cspan<const char*>){
+            print_build_info(ot, std::cout);
+            ot.printed_info = true;
+        });
     ap.arg("--info")
       .help("Print resolution and basic info on all inputs, detailed metadata if -v is also used (options: format=xml:verbose=1)")
       .OTACTION(set_printinfo);

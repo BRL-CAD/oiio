@@ -567,10 +567,10 @@ IvGL::paintGL()
     ybegin     = std::max(spec.y, ybegin - (ybegin % m_texture_height));
     int xend   = (int)floor(real_centerx) + wincenterx;
     xend       = std::min(spec.x + spec.width,
-                    xend + m_texture_width - (xend % m_texture_width));
+                          xend + m_texture_width - (xend % m_texture_width));
     int yend   = (int)floor(real_centery) + wincentery;
     yend       = std::min(spec.y + spec.height,
-                    yend + m_texture_height - (yend % m_texture_height));
+                          yend + m_texture_height - (yend % m_texture_height));
     //std::cerr << "(" << xbegin << ',' << ybegin << ") - (" << xend << ',' << yend << ")\n";
 
     // Provide some feedback
@@ -1494,7 +1494,10 @@ IvGL::load_texture(int x, int y, int width, int height)
     }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo_objects[m_last_pbo_used]);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * spec.pixel_bytes(),
+    glBufferData(GL_PIXEL_UNPACK_BUFFER,
+                 GLsizeiptr(uint64_t(width) * uint64_t(height)
+                            * uint64_t(nchannels)
+                            * uint64_t(spec.format.size())),
                  &m_tex_buffer[0], GL_STREAM_DRAW);
     GLERRPRINT("After buffer data");
     m_last_pbo_used = (m_last_pbo_used + 1) & 1;

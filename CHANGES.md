@@ -1,3 +1,61 @@
+Release 2.5.9.0 (Mar 1, 2024) -- compared to 2.5.8.0
+-----------------------------------------------------
+- *oiiotool*: Overhaul and fix bugs in mixed-channel propogation [#4127](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4127)
+- *oiiotool*: Fixes to buildinfo queries [#4150](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4150)
+- *dcmtk*: Fixes for DCMTK [#4147](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4147)
+- *build*: Address NEON issues in simd.h. [#4143](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4143)
+- *typedesc.h*: Allow TypeDesc to have all the right POD attributes [#4162](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4162) (by Scott Wilson)
+- *internals*: Various fixes for memory safety and reduce static analysis complaints [#4128](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4128)
+- *internals*: Coalesce redundant STRINGIZE macros -> OIIO_STRINGIZE [#4121](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4121)
+- *ci*: Start using macos-14 ARM runners, bump latest OCIO [#4134](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4134)
+- *ci*: Switch away from deprecated GHA idiom set-output [#4141](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4141)
+- *ci*: Add vfx platform 2024 [#4163](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4163)
+- *ci*: Fix Windows CI, need to build newer openexr and adjust boost search [#4167](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4167)
+- *tests*: Add test for filter values and 'filter_list' query [#4140](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4140)
+- *docs*: Update SECURITY and RELEASING documentation [#4138](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4138)
+- *docs*: Fix tab that was missing from the rendering on rtd [#4137](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4137)
+- *docs*: Fix python example [#4139](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4139)
+- *admin*: More updated relicensing code under Apache 2.0
+
+
+Release 2.5.8.0 (Feb 1, 2024) -- compared to 2.5.7.0
+-----------------------------------------------------
+- *feat(oiiotool)*: New `--buildinfo` command prints build information,
+  including version, compiler, and all library dependencies. [#4124](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4124)
+- *feat(api)*: New global getattribute queries: "build:platform",
+  "build:compiler", "build:dependencies" [#4124](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4124)
+- *feat(openexr)*: Add support for luminance-chroma OpenEXR images. [#4070](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4070) (by jreichel-nvidia)
+- *fix(raw)*: Avoid buffer overrun for flip direction cases [#4100](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4100)
+- *fix(iv)*: Assume iv display gamma 2.2 if `GAMMA` env variable is not set [#4118](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4118)
+- *fix*: Fixes to reduce problems identified by static analysis [#4113](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4113)
+- *dev(simd.h)*: Make all-architecture matrix44::inverse() [#4076](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4076)
+- *dev(simd.h)*: Fix AVX-512 round function [#4119](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4119) (by AngryLoki)
+- *build(deps)*: Remove Findfmt.cmake, rely on that package's exported config. [#4069](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4069) [#4103](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4103) (by Dominik Wójt)
+- *build(deps)*: Account for header changes in fmt project trunk [#4109](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4109) [#4114](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4114)
+- *tests*: Shuffle some tests between directories [#4091](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4091)
+- *tests*: Fix docs test, used wrong namespace [#4090](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4090)
+- *docs*: Fix broken IBA color management documentation [#4104](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4104)
+- *style*: Update our formatting standard to clang-format 17.0 and C++17 [#4096](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4096)
+
+
+Release 2.5.7.0 (Jan 1, 2024) -- compared to 2.5.6.0
+-----------------------------------------------------
+- *fix(iv)*: Avoid crash with OpenGL + multi-channel images [#4087](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4087)
+- *fix(png)*: Fix crash for writing large PNGs with alpha [#4074](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4074)
+- *fix(ImageInput)*: Only check REST arguments if the file does not exist, avoiding problems for filenames that legitimately contain a `?` character. [#4085](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4085) (by AdamMainsTL)
+- *perf(IBA)*: Improve perf of ImageBufAlgo::channels in-place operation [#4088](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4088)
+- *build*: Ptex support for static library [#4072](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4072) (by Dominik Wójt)
+- *build*: Add a way to cram in a custom extra library for iv [#4086](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4086)
+- *build*: JPEG2000: Include the headers we need to discern version [#4073](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4073)
+- *tests*: Improve color management test in imagebufalgo_test [#4063](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4063)
+- *tests*: Add one more ref output for python-colorconfig test [#4065](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4065)
+- *ci*: Restrict Mac ARM running [#4077](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4077)
+- *ci*: Rename macro to avoid conflict during CI unity builds [#4092](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4092)
+- *docs*: Fix typo [#4089](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4089)
+- *docs*: Fix link to openexr test images [#4080](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4080) (by Jesse Yurkovich)
+- *admin*: Account for duplicate emails in the .mailmap [#4075](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4075)
+- *dev*: Faster vint4 load/store with unsigned char conversion [#4071](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4071) (by Aras Pranckevičius)
+
 Release 2.5.6.0 (Dec 1, 2023) -- compared to 2.5.5.0
 -----------------------------------------------------
 - *oiiotool*: --autocc bugfix and color config inventory cleanup [#4060](https://github.com/AcademySoftwareFoundation/OpenImageIO/pull/4060)
@@ -2454,7 +2512,7 @@ Developer goodies / internals:
     - TypeDesc can now describe 2D and 3D bounding boxes, as arrays of 2
       VEC2 aggregates (for 2D) or VEC3 aggregates (for 3D) with "BOX"
       semantic. The shorthand for these are `TypeBox2`, `TypeBox3` (for
-      float), and `TypeBox2i` and `TypeBox3i` for integer or pixel coordinte
+      float), and `TypeBox2i` and `TypeBox3i` for integer or pixel coordinate
       boxes. #3008 (2.2.17/2.3.6)
 * unordered_map_concurrent.h:
     - New methods find_or_insert, nobin_mask(). #2867 (2.2.12/2.3.3)
@@ -2657,7 +2715,7 @@ Release 2.2.17 (1 Aug 2021) -- compared to 2.2.16
 * typedesc.h: TypeDesc can now describe 2D and 3D bounding boxes, as arrays
   of 2 VEC2 aggregates (for 2D) or VEC3 aggregates (for 3D) with "BOX"
   semantic. The shorthand for these are `TypeBox2`, `TypeBox3` (for float),
-  and `TypeBox2i` and `TypeBox3i` for integer or pixel coordinte
+  and `TypeBox2i` and `TypeBox3i` for integer or pixel coordinate
   boxes. #3008
 * Build: Fixes for building against fmt 8.0.0. #3007
 * Build: Finding boost is more flexible when desiring static libraries. #3031
