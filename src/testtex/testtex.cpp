@@ -1875,11 +1875,9 @@ main(int argc, const char* argv[])
         iters = 0;
     }
 
-#ifndef OIIO_CODE_COVERAGE
     if (testhash) {
         TextureSystem::unit_test_hash();
     }
-#endif
 
     Imath::M33f scale;
     scale.scale(Imath::V2f(0.3, 0.3));

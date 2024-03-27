@@ -87,12 +87,6 @@ BmpOutput::open(const std::string& name, const ImageSpec& spec, OpenMode mode)
 
     m_filename = name;
 
-    if (m_spec.x || m_spec.y || m_spec.z) {
-        errorfmt("{} does not support images with non-zero image origin offset",
-                 format_name());
-        return false;
-    }
-
     // Only support 8 bit channels for now.
     m_spec.set_format(TypeDesc::UINT8);
     m_dither = m_spec.get_int_attribute("oiio:dither", 0);

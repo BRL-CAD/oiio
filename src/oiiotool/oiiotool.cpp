@@ -19,7 +19,6 @@
 
 #include "oiiotool.h"
 
-#include <OpenEXR/IlmThreadPool.h>
 #include <OpenEXR/ImfTimeCode.h>
 #include <OpenImageIO/Imath.h>
 
@@ -47,10 +46,6 @@ using namespace OiioTool;
 using namespace ImageBufAlgo;
 using pvt::print_info_options;
 
-
-#ifndef NDEBUG
-#    define OIIO_UNIT_TESTS 1
-#endif
 
 #ifndef NDEBUG
 #    define OIIO_UNIT_TESTS 1
@@ -2640,84 +2635,6 @@ icc_write(Oiiotool& ot, cspan<const char*> argv)
 // --iccread
 static void
 icc_read(Oiiotool& ot, cspan<const char*> argv)
-{
-    OIIO_DASSERT(argv.size() == 2);
-    if (ot.postpone_callback(1, icc_read, argv))
-        return;
-    string_view command  = ot.express(argv[0]);
-    std::string filename = ot.express(argv[1]);
-    OTScopedTimer timer(ot, command);
-    auto options      = ot.extract_options(command);
-    bool allsubimages = options.get_int("allsubimages", ot.allsubimages);
-
-    if (!Filesystem::exists(filename)) {
-        ot.errorfmt(command, "ICC profile file {} does not exist", filename);
-        return;
-    }
-    size_t len = Filesystem::file_size(filename);
-
-    // Validity check: ICC profiles have a 128 byte header, and we also
-    // presume they are no more than 64k, so file outside that range should
-    // be rejected. (Is that a fair assumption?)
-    if (len < 1 || len >= 64 * 1024 * 1024) {
-        ot.errorfmt(command, "File {} is not a valid ICC profile", filename);
-        return;
-    }
-
-    std::unique_ptr<char[]> icc(new char[len]);
-    size_t size = Filesystem::read_bytes(filename, icc.get(), len);
-    if (size != len) {
-        ot.errorfmt(command, "Could not read ICC profile from {}", filename);
-        return;
-    }
-
-    ot.read();
-    ImageRecRef A = ot.curimg;
-    int subimages = allsubimages ? A->subimages() : 1;
-    for (int s = 0; s < subimages; ++s) {
-        (*A)(s).specmod().attribute("ICCProfile",
-                                    TypeDesc(TypeDesc::UINT8, len), icc.get());
-        A->update_spec_from_imagebuf(s);
-    }
-    A->metadata_modified(true);
-}
-
-
-
-// --iccwrite  (output extracted ICC profile)
-static void
-icc_write(cspan<const char*> argv)
-{
-    OIIO_DASSERT(argv.size() == 2);
-    if (ot.postpone_callback(1, icc_write, argv))
-        return;
-    string_view command  = ot.express(argv[0]);
-    std::string filename = ot.express(argv[1]);
-    OTScopedTimer timer(ot, command);
-    // auto options      = ot.extract_options(command);
-    // bool allsubimages = options.get_int("allsubimages", ot.allsubimages);
-
-    ot.read();
-    ImageRecRef A = ot.curimg;
-    ImageSpec& spec(*A->spec(0));
-    const ParamValue* icc = spec.find_attribute("ICCProfile");
-    if (icc) {
-        bool ok = Filesystem::write_binary_file(
-            filename, cspan<char>((const char*)icc->data(), icc->datasize()));
-        if (!ok) {
-            ot.errorfmt(command, "Could not write ICC profile to {}", filename);
-        }
-    } else {
-        ot.errorfmt(command, "No ICC profile found in image.", A->name());
-    }
-    ot.num_outputs += 1;
-}
-
-
-
-// --iccread
-static void
-icc_read(cspan<const char*> argv)
 {
     OIIO_DASSERT(argv.size() == 2);
     if (ot.postpone_callback(1, icc_read, argv))

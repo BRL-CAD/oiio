@@ -49,11 +49,6 @@
 #    endif
 #endif
 
-//Avoid min and max being defined
-#if defined(_WIN32)
-#define NOMINMAX
-#endif
-
 #include <OpenImageIO/oiioversion.h>
 #include <OpenImageIO/export.h>
 

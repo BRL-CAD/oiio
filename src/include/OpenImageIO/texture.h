@@ -25,9 +25,6 @@
 // Is the getattributetype() method present? (Added in 2.5)
 #define OIIO_TEXTURESYSTEM_SUPPORTS_GETATTRIBUTETYPE 1
 
-// Is the getattributetype() method present? (Added in 2.5)
-#define OIIO_TEXTURESYSTEM_SUPPORTS_GETATTRIBUTETYPE 1
-
 #define OIIO_TEXTURESYSTEM_SUPPORTS_STOCHASTIC 1
 
 #ifndef INCLUDED_IMATHVEC_H

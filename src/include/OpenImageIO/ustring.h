@@ -860,13 +860,6 @@ public:
     {
     }
 
-    /// Construct from a raw hash value. Beware: results are undefined if it's
-    /// not the valid hash of a ustring.
-    OIIO_HOSTDEVICE explicit constexpr ustringhash(size_t hash) noexcept
-        : m_hash(hash)
-    {
-    }
-
     /// Conversion to an OIIO::string_view.
     operator string_view() const noexcept { return ustring::from_hash(m_hash); }
 
