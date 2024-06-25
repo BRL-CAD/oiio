@@ -259,8 +259,10 @@ macro (oiio_add_all_tests)
                     IMAGEDIR openexr-images
                     URL http://github.com/AcademySoftwareFoundation/openexr-images)
     oiio_add_tests (heif
-                    FOUNDVAR Libheif_FOUND ENABLEVAR ENABLE_Libheif
-                    URL https://github.com/nokiatech/heif/tree/gh-pages/content)
+                    FOUNDVAR Libheif_FOUND
+                    ENABLEVAR ENABLE_Libheif
+                    IMAGEDIR oiio-images/heif
+                    URL http://github.com/AcademySoftwareFoundation/openexr-images)
     oiio_add_tests (ico
                     ENABLEVAR ENABLE_ICO
                     IMAGEDIR oiio-images URL "Recent checkout of oiio-images")
@@ -275,8 +277,11 @@ macro (oiio_add_all_tests)
                     IMAGEDIR j2kp4files_v1_5
                     URL http://www.itu.int/net/ITU-T/sigdb/speimage/ImageForm-s.aspx?val=10100803)
     set (all_openexr_tests
-         openexr-suite openexr-multires openexr-chroma
+         openexr-suite openexr-multires openexr-chroma openexr-decreasingy
          openexr-v2 openexr-window perchannel oiiotool-deep)
+    if (USE_PYTHON AND NOT SANITIZE)
+        list (APPEND all_openexr_tests openexr-copy)
+    endif ()
     if (OpenEXR_VERSION VERSION_GREATER_EQUAL 3.1.10)
         # OpenEXR 3.1.10 is the first release where the exr core library
         # properly supported all compression types (DWA in particular).

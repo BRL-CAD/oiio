@@ -10,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 
 #include <OpenImageIO/Imath.h>
 #include <OpenImageIO/platform.h>
@@ -20,6 +21,7 @@
 #include <OpenEXR/ImfOutputFile.h>
 #include <OpenEXR/ImfTiledOutputFile.h>
 
+#include "exr_pvt.h"
 #define OPENEXR_CODED_VERSION                                    \
     (OPENEXR_VERSION_MAJOR * 10000 + OPENEXR_VERSION_MINOR * 100 \
      + OPENEXR_VERSION_PATCH)
@@ -118,6 +120,7 @@ public:
     bool open(const std::string& name, int subimages,
               const ImageSpec* specs) override;
     bool close() override;
+    bool copy_image(ImageInput* in) override;
     bool write_scanline(int y, int z, TypeDesc format, const void* data,
                         stride_t xstride) override;
     bool write_scanlines(int ybegin, int yend, int z, TypeDesc format,
@@ -399,7 +402,6 @@ OpenEXROutput::open(const std::string& name, const ImageSpec& userspec,
                 m_io = new Filesystem::IOFile(name, Filesystem::IOProxy::Write);
                 m_local_io.reset(m_io);
             }
-            OIIO_ASSERT(m_io);
             if (m_io->mode() != Filesystem::IOProxy::Write) {
                 // If the proxy couldn't be opened in write mode, try to
                 // return an error.
@@ -579,13 +581,20 @@ OpenEXROutput::open(const std::string& name, int subimages,
 
     // Create an ImfMultiPartOutputFile
     try {
-        // m_output_stream.reset (new OpenEXROutputStream (name.c_str())();
-        // m_output_multipart.reset (new Imf::MultiPartOutputFile (*m_output_stream,
-        //                                          &m_headers[0], subimages)();
-        // FIXME: Oops, looks like OpenEXR 2.0 currently lacks a
-        // MultiPartOutputFile ctr that takes an OStream, so we can't
-        // do this quite yet.
-        m_output_multipart.reset(new Imf::MultiPartOutputFile(name.c_str(),
+        if (!m_io) {
+            m_io = new Filesystem::IOFile(name, Filesystem::IOProxy::Write);
+            m_local_io.reset(m_io);
+        }
+        if (m_io->mode() != Filesystem::IOProxy::Write) {
+            // If the proxy couldn't be opened in write mode, try to
+            // return an error.
+            std::string e = m_io->error();
+            errorfmt("Could not open \"{}\" ({})", name,
+                     e.size() ? e : std::string("unknown error"));
+            return false;
+        }
+        m_output_stream.reset(new OpenEXROutputStream(name.c_str(), m_io));
+        m_output_multipart.reset(new Imf::MultiPartOutputFile(*m_output_stream,
                                                               &m_headers[0],
                                                               subimages));
     } catch (const std::exception& e) {
@@ -1404,6 +1413,60 @@ OpenEXROutput::write_scanline(int y, int z, TypeDesc format, const void* data,
 
 
 bool
+OpenEXROutput::copy_image(ImageInput* in)
+{
+    if (in && !strcmp(in->format_name(), "openexr")) {
+        if (OpenEXRInput* exr_in = dynamic_cast<OpenEXRInput*>(in)) {
+            // Copy over pixels without decompression.
+            try {
+                if (m_output_scanline && exr_in->m_scanline_input_part) {
+                    m_output_scanline->copyPixels(
+                        *exr_in->m_scanline_input_part);
+                    return true;
+                } else if (m_output_tiled && exr_in->m_tiled_input_part
+                           && m_nmiplevels == 0) {
+                    m_output_tiled->copyPixels(*exr_in->m_tiled_input_part);
+                    return true;
+                } else if (m_scanline_output_part
+                           && exr_in->m_scanline_input_part) {
+                    m_scanline_output_part->copyPixels(
+                        *exr_in->m_scanline_input_part);
+                    return true;
+                } else if (m_tiled_output_part && exr_in->m_tiled_input_part
+                           && m_nmiplevels == 0) {
+                    m_tiled_output_part->copyPixels(
+                        *exr_in->m_tiled_input_part);
+                    return true;
+                } else if (m_deep_scanline_output_part
+                           && exr_in->m_deep_scanline_input_part) {
+                    m_deep_scanline_output_part->copyPixels(
+                        *exr_in->m_deep_scanline_input_part);
+                    return true;
+                } else if (m_deep_tiled_output_part
+                           && exr_in->m_deep_tiled_input_part
+                           && m_nmiplevels == 0) {
+                    m_deep_tiled_output_part->copyPixels(
+                        *exr_in->m_deep_tiled_input_part);
+                    return true;
+                }
+            } catch (const std::exception& e) {
+                errorf(
+                    "Failed OpenEXR copy: %s, falling back to the default image copy routine.",
+                    e.what());
+                return false;
+            } catch (...) {  // catch-all for edge cases or compiler bugs
+                errorf(
+                    "Failed OpenEXR copy: unknown exception, falling back to the default image copy routine.");
+                return false;
+            }
+        }
+    }
+    return ImageOutput::copy_image(in);
+}
+
+
+
+bool
 OpenEXROutput::write_scanlines(int ybegin, int yend, int z, TypeDesc format,
                                const void* data, stride_t xstride,
                                stride_t ystride)
@@ -1427,21 +1490,33 @@ OpenEXROutput::write_scanlines(int ybegin, int yend, int z, TypeDesc format,
                               * 1024;  // Allocate 16 MB, or 1 scanline
     int chunk = std::max(1, int(limit / scanlinebytes));
 
-    bool ok = true;
-    for (; ok && ybegin < yend; ybegin += chunk) {
-        int y1         = std::min(ybegin + chunk, yend);
-        int nscanlines = y1 - ybegin;
-        const void* d  = to_native_rectangle(m_spec.x, m_spec.x + m_spec.width,
-                                             ybegin, y1, z, z + 1, format, data,
-                                             xstride, ystride, zstride,
-                                             m_scratch);
+    bool ok                  = true;
+    const bool isDecreasingY = m_spec.get_string_attribute("openexr:lineOrder")
+                               == "decreasingY";
+    const int nAvailableScanLines = yend - ybegin;
+    const int numChunks           = nAvailableScanLines > 0
+                                        ? 1 + ((nAvailableScanLines - 1) / chunk)
+                                        : 0;
+    const int yLoopStart = isDecreasingY ? ybegin + (numChunks - 1) * chunk
+                                         : ybegin;
+    const int yDelta     = isDecreasingY ? -chunk : chunk;
+    const int yLoopEnd   = yLoopStart + numChunks * yDelta;
+    for (int y = yLoopStart; ok && y != yLoopEnd; y += yDelta) {
+        int y1         = std::min(y + chunk, yend);
+        int nscanlines = y1 - y;
+
+        const void* dataStart = (const char*)data + (y - ybegin) * ystride;
+        const void* d = to_native_rectangle(m_spec.x, m_spec.x + m_spec.width,
+                                            y, y1, z, z + 1, format, dataStart,
+                                            xstride, ystride, zstride,
+                                            m_scratch);
 
         // Compute where OpenEXR needs to think the full buffers starts.
         // OpenImageIO requires that 'data' points to where client stored
         // the bytes to be written, but OpenEXR's frameBuffer.insert() wants
         // where the address of the "virtual framebuffer" for the whole
         // image.
-        char* buf = (char*)d - m_spec.x * pixel_bytes - ybegin * scanlinebytes;
+        char* buf = (char*)d - m_spec.x * pixel_bytes - y * scanlinebytes;
         try {
             Imf::FrameBuffer frameBuffer;
             size_t chanoffset = 0;
@@ -1469,8 +1544,6 @@ OpenEXROutput::write_scanlines(int ybegin, int yend, int z, TypeDesc format,
             errorf("Failed OpenEXR write: unknown exception");
             return false;
         }
-
-        data = (const char*)data + ystride * nscanlines;
     }
 
     // If we allocated more than 1M, free the memory.  It's not wasteful,

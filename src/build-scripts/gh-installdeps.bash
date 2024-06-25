@@ -69,7 +69,9 @@ if [[ "$ASWF_ORG" != ""  ]] ; then
 else
     # Using native Ubuntu runner
 
-    time sudo apt-get update
+    if [[ "${SKIP_APT_GET_UPDATE}" != "1" ]] ; then
+        time sudo apt-get update
+    fi
 
     time sudo apt-get -q install -y \
         git cmake ninja-build ccache g++ \
@@ -82,7 +84,6 @@ else
             libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
             dcmtk libopenvdb-dev \
             libfreetype6-dev \
-            locales wget \
             libopencolorio-dev \
             libtbb-dev \
             libopencv-dev
@@ -100,12 +101,11 @@ else
     # Nonstandard python versions
     if [[ "${PYTHON_VERSION}" == "3.9" ]] ; then
         time sudo apt-get -q install -y python3.9-dev python3-numpy
-        pip3 --version
-        pip3 install numpy
     elif [[ "$PYTHON_VERSION" == "2.7" ]] ; then
         time sudo apt-get -q install -y python-dev python-numpy
-    else
-        pip3 install numpy
+    fi
+    if [[ "${PIP_INSTALLS:=numpy}" != "none" ]] ; then
+        time pip3 install ${PIP_INSTALLS}
     fi
 
     if [[ "$USE_LIBHEIF" != "0" ]] ; then
@@ -132,13 +132,17 @@ else
         time sudo apt-get install -y g++-11
     elif [[ "$CXX" == "g++-12" ]] ; then
         time sudo apt-get install -y g++-12
+    elif [[ "$CXX" == "g++-13" ]] ; then
+        time sudo apt-get install -y g++-13
+    elif [[ "$CXX" == "g++-14" ]] ; then
+        time sudo apt-get install -y g++-14
     fi
 
     if [[ "$CXX" == "icpc" || "$CC" == "icc" || "$USE_ICC" != "" || "$USE_ICX" != "" ]] ; then
+        time sudo apt-get -q install -y wget
         wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2023.PUB
         sudo apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS-2023.PUB
         echo "deb https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        time sudo apt-get update
         time sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp-and-cpp-classic
         set +e; source /opt/intel/oneapi/setvars.sh; set -e
     fi

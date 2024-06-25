@@ -212,8 +212,8 @@ checked_find_package (GIF
 
 # For HEIF/HEIC/AVIF formats
 checked_find_package (Libheif VERSION_MIN 1.3
-                      RECOMMEND_MIN 1.7
-                      RECOMMEND_MIN_REASON "for AVIF support")
+                      RECOMMEND_MIN 1.16
+                      RECOMMEND_MIN_REASON "for orientation support")
 if (APPLE AND LIBHEIF_VERSION VERSION_GREATER_EQUAL 1.10 AND LIBHEIF_VERSION VERSION_LESS 1.11)
     message (WARNING "Libheif 1.10 on Apple is known to be broken, disabling libheif support")
     set (Libheif_FOUND 0)
@@ -243,7 +243,8 @@ checked_find_package (OpenVDB
                       DEFINITIONS  -DUSE_OPENVDB=1)
 if (OpenVDB_FOUND AND OpenVDB_VERSION VERSION_GREATER_EQUAL 10.1 AND CMAKE_CXX_STANDARD VERSION_LESS 17)
     message (WARNING "${ColorYellow}OpenVDB >= 10.1 (we found ${OpenVDB_VERSION}) can only be used when we build with C++17 or higher. Disabling OpenVDB support.${ColorReset}")
-    set (OpeVDB_FOUND 0)
+    set (OpenVDB_FOUND 0)
+    add_compile_definitions(DISABLE_OPENVDB=1)
 endif ()
 
 checked_find_package (Ptex PREFER_CONFIG)

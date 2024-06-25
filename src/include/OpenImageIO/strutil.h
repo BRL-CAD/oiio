@@ -366,13 +366,13 @@ std::string OIIO_UTIL_API wordwrap (string_view src, int columns = 80,
 
 
 /// Our favorite "string" hash of a length of bytes. Currently, it is just
-/// a wrapper for an inlined, constexpr (if C++ >= 14), Cuda-safe farmhash.
+/// a wrapper for an inlined, constexpr, Cuda-safe farmhash.
 /// It returns a size_t, so will be a 64 bit hash on 64-bit platforms, but
 /// a 32 bit hash on 32-bit platforms.
 inline constexpr size_t
 strhash(size_t len, const char *s)
 {
-    return OIIO::farmhash::inlined::Hash(s, len);
+    return size_t(OIIO::farmhash::inlined::Hash64(s, len));
 }
 
 
@@ -1154,6 +1154,19 @@ enum class EditDistMetric { Levenshtein };
 OIIO_UTIL_API size_t
 edit_distance(string_view a, string_view b,
               EditDistMetric metric = EditDistMetric::Levenshtein);
+
+
+/// Evaluate a string as a boolean value using the following heuristic:
+///   - If the string is a valid numeric value (represents an integer or
+///     floating point value), return true if it's non-zero, false if it's
+///     zero.
+///   - If the string is one of "false", "no", or "off", or if it contains
+///     only whitespace, return false.
+///   - All other non-empty strings return true.
+/// The comparisons are case-insensitive and ignore leading and trailing
+/// whitespace.
+OIIO_UTIL_API bool
+eval_as_bool(string_view value);
 
 }  // namespace Strutil
 

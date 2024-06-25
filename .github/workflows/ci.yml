@@ -20,6 +20,8 @@ on:
     # Full nightly build
     - cron: "0 8 * * *"
       if: github.repository == 'AcademySoftwareFoundation/OpenImageIO'
+  workflow_dispatch:
+    # This allows manual triggering of the workflow from the web
 
 permissions: read-all
 
@@ -306,16 +308,16 @@ jobs:
                             USE_OPENVDB=0
                             WEBP_VERSION=v1.3.0
                             # The installed OpenVDB has a TLS conflict with Python 3.8
-          - desc: bleeding edge gcc13 C++20 py3.10 OCIO/libtiff/exr-master boost1.74 avx2
+          - desc: bleeding edge gcc14 C++20 py3.12 OCIO/libtiff/exr-master boost1.74 avx2
             nametag: linux-bleeding-edge
-            runner: ubuntu-22.04
-            cc_compiler: gcc-13
-            cxx_compiler: g++-13
+            runner: ubuntu-24.04
+            cc_compiler: gcc-14
+            cxx_compiler: g++-14
             cxx_std: 20
             fmt_ver: 10.0.0
             openexr_ver: main
             pybind11_ver: master
-            python_ver: "3.10"
+            python_ver: "3.12"
             simd: avx2,f16c
             setenvs: export LIBJPEGTURBO_VERSION=main
                             LIBRAW_VERSION=master
@@ -324,10 +326,18 @@ jobs:
                             OPENJPEG_VERSION=master
                             PTEX_VERSION=main
                             PUGIXML_VERSION=master
-                            USE_OPENVDB=0
                             WEBP_VERSION=main
                             OIIO_CMAKE_FLAGS="-DFORTIFY_SOURCE=2"
+                            QT_VERSION=6
+                            EXTRA_DEP_PACKAGES="python3.12-dev python3-numpy"
+                            PIP_INSTALLS="none"
+                            USE_OPENVDB=0
+                            SKIP_APT_GET_UPDATE=1
                             # The installed OpenVDB has a TLS conflict with Python 3.8
+                            # Disabling the `apt-get update` in gh-installdeps.bash 
+                            # addresses a job killing problem in the GHA Ubuntu
+                            # 24.04 runners that cropped up circa May 29 2024. Maybe
+                            # it will be fixed and we can do the update again later?
           - desc: clang14 C++20 avx2 exr3.1 ocio2.1
             nametag: linux-clang14
             runner: ubuntu-20.04
@@ -429,6 +439,7 @@ jobs:
           path: /tmp/ccache
           key: ${{github.job}}-${{matrix.nametag}}-${{ steps.ccache_cache_keys.outputs.date }}
           restore-keys: ${{github.job}}-
+          save-always: true
       - name: Build setup
         run: |
             ${{matrix.setenvs}}
@@ -456,7 +467,7 @@ jobs:
             !build/testsuite/j2kp4files_v1_5
 
 
-  macrunner:
+  macos:
     name: "${{matrix.runner}} appleclang${{matrix.aclang}}/C++${{matrix.cxx_std}} py${{matrix.python_ver}} ${{matrix.desc}}"
     strategy:
       fail-fast: false
@@ -465,27 +476,35 @@ jobs:
           - desc: MacOS-12
             runner: macos-12
             nametag: macos12-py310
+            cc_compiler: clang
+            cxx_compiler: clang++
             cxx_std: 17
             python_ver: "3.10"
             aclang: 13
           - desc: MacOS-13
             runner: macos-13
             nametag: macos13-py311
+            cc_compiler: clang
+            cxx_compiler: clang++
             cxx_std: 17
             python_ver: "3.11"
             aclang: 14
+            simd: sse4.2,avx2
           - desc: MacOS-14-ARM
             runner: macos-14
             nametag: macos14-arm-py311
+            cc_compiler: clang
+            cxx_compiler: clang++
             cxx_std: 20
             python_ver: "3.11"
             aclang: 15
     runs-on: ${{ matrix.runner }}
     env:
-      CC: clang
-      CXX: clang++
+      CXX: ${{matrix.cxx_compiler}}
+      CC: ${{matrix.cc_compiler}}
       CMAKE_CXX_STANDARD: ${{ matrix.cxx_std }}
       PYTHON_VERSION: ${{ matrix.python_ver }}
+      USE_SIMD: ${{matrix.simd}}
       CTEST_TEST_TIMEOUT: 600
     steps:
       - uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # v3.0.2
@@ -499,6 +518,7 @@ jobs:
           path: /Users/runner/.ccache
           key: ${{github.job}}-${{matrix.nametag}}-${{ steps.ccache_cache_keys.outputs.date }}
           restore-keys: ${{github.job}}-
+          save-always: true
       - name: Build setup
         run: |
             ${{matrix.setenvs}}
@@ -538,15 +558,14 @@ jobs:
             generator: "Visual Studio 16 2019"
             openexr_ver: v3.2.2
             python_ver: 3.7
-            simd: sse4.2
-          # - desc: windows-2022
-          #   runner: windows-2022
-          #   vsver: 2022
-          #   generator: "Visual Studio 17 2022"
-          #   openexr_ver: main
-          #   # v3.1.4
-          #   python_ver: 3.7
-          #   simd: sse4.2
+            # simd: sse4.2
+          - desc: windows-2022
+            runner: windows-2022
+            vsver: 2022
+            generator: "Visual Studio 17 2022"
+            openexr_ver: v3.2.2
+            python_ver: "3.9"
+            # simd: sse4.2
     runs-on: ${{ matrix.runner }}
     env:
       PYTHON_VERSION: ${{matrix.python_ver}}
