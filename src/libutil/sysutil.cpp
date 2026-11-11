@@ -326,15 +326,15 @@ Sysutil::terminal_columns()
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) \
     || defined(__FreeBSD_kernel__) || defined(__NetBSD__)            \
     || defined(__OpenBSD__) || defined(__GNU__)
-    struct winsize w;
-    ioctl(0, TIOCGWINSZ, &w);
-    columns = w.ws_col;
+    struct winsize w = {};
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
+        columns = w.ws_col;
 #elif defined(_WIN32)
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     if (h != INVALID_HANDLE_VALUE) {
         CONSOLE_SCREEN_BUFFER_INFO csbi = { { 0 } };
-        GetConsoleScreenBufferInfo(h, &csbi);
-        columns = csbi.dwSize.X;
+        if (GetConsoleScreenBufferInfo(h, &csbi) && csbi.dwSize.X > 0)
+            columns = csbi.dwSize.X;
     }
 #endif
 
@@ -351,15 +351,15 @@ Sysutil::terminal_rows()
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) \
     || defined(__FreeBSD_kernel__) || defined(__NetBSD__)            \
     || defined(__OpenBSD__) || defined(__GNU__)
-    struct winsize w;
-    ioctl(0, TIOCGWINSZ, &w);
-    rows = w.ws_row;
+    struct winsize w = {};
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row > 0)
+        rows = w.ws_row;
 #elif defined(_WIN32)
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     if (h != INVALID_HANDLE_VALUE) {
         CONSOLE_SCREEN_BUFFER_INFO csbi = { { 0 } };
-        GetConsoleScreenBufferInfo(h, &csbi);
-        rows = csbi.dwSize.Y;
+        if (GetConsoleScreenBufferInfo(h, &csbi) && csbi.dwSize.Y > 0)
+            rows = csbi.dwSize.Y;
     }
 #endif
 

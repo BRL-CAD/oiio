@@ -141,6 +141,10 @@ endif ()
 
 if (OIIO_BUILD_TESTS AND BUILD_TESTING)
 
+    fancy_add_executable (NAME sysutil_test SRC sysutil_test.cpp
+                          LINK_LIBRARIES OpenImageIO_Util)
+    add_test (unit_sysutil ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/sysutil_test)
+
     fancy_add_executable (NAME argparse_test SRC argparse_test.cpp
                           NO_INSTALL  FOLDER "Unit Tests"
                           LINK_LIBRARIES OpenImageIO_Util)
