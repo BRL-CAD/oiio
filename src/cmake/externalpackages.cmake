@@ -168,9 +168,17 @@ elseif (TARGET PNG::PNG)
     set (PNG_TARGET PNG::PNG)
 endif ()
 
-checked_find_package (Freetype
-                      VERSION_MIN 2.10.0
-                      DEFINITIONS USE_FREETYPE=1 )
+option (USE_STRUETYPE "Use bounded struetype font rendering instead of FreeType" OFF)
+if (USE_STRUETYPE)
+    find_path (STRUETYPE_INCLUDE_DIR NAMES struetype.h
+              HINTS ${STRUETYPE_ROOT} PATH_SUFFIXES include REQUIRED)
+    add_compile_definitions (USE_STRUETYPE=1)
+    include_directories (SYSTEM ${STRUETYPE_INCLUDE_DIR})
+else ()
+    checked_find_package (Freetype
+                          VERSION_MIN 2.10.0
+                          DEFINITIONS USE_FREETYPE=1 )
+endif ()
 
 checked_find_package (OpenColorIO REQUIRED
                       VERSION_MIN 2.3

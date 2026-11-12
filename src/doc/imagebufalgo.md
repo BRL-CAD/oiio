@@ -563,6 +563,15 @@ pre-allocated `dst` nor a non-default ROI.
 
 ### Drawing text
 
+Text rendering uses FreeType by default. Builds configured with
+`-DUSE_STRUETYPE=ON -DSTRUETYPE_ROOT=<prefix>` use the bounded, header-only
+struetype backend instead. The prefix must contain `include/struetype.h`.
+This backend supports ordinary TrueType and OpenType outline fonts, UTF-8
+text, family/style lookup, alignment, and shadows. Rasterization is unhinted,
+so glyph coverage and metrics can differ from FreeType. FreeType remains
+appropriate for its additional font formats and rendering capabilities.
+
+
 :::{doxygenfunction} render_text(ImageBuf &dst, int x, int y, string_view text, int fontsize = 16, string_view fontname = "", cspan<float> textcolor = 1.0f, TextAlignX alignx = TextAlignX::Left, TextAlignY aligny = TextAlignY::Baseline, int shadow = 0, ROI roi = {}, int nthreads = 0)
 :::
 

@@ -23,9 +23,8 @@
 
 #include "imageio_pvt.h"
 
-#ifdef USE_FREETYPE
-#    include <ft2build.h>
-#    include FT_FREETYPE_H
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
+#    include "imagebufalgo_font.h"
 #endif
 
 #if OIIO_GNUC_VERSION >= 80000 /* gcc 8+ */
@@ -865,8 +864,12 @@ enumerate_fonts()
         Filesystem::get_directory_entries(dir, filenames, false);
         for (auto& f : filenames) {
             if (Strutil::iends_with(f, ".ttf") || Strutil::iends_with(f, ".ttc")
+                || Strutil::iends_with(f, ".otf")
+#ifndef USE_STRUETYPE
                 || Strutil::iends_with(f, ".pfa")
-                || Strutil::iends_with(f, ".pfb")) {
+                || Strutil::iends_with(f, ".pfb")
+#endif
+            ) {
                 std::string fontname
                     = Filesystem::replace_extension(Filesystem::filename(f),
                                                     "");
@@ -915,46 +918,62 @@ pvt::font_list()
 
 
 
-#ifdef USE_FREETYPE
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
 namespace {  // anon
-static mutex ft_mutex;
-static FT_Library ft_library = NULL;
-static bool ft_broken        = false;
+static mutex font_mutex;
 
 static const char* default_font_name[] = { "DroidSans", "cour", "Courier New",
                                            "FreeMono" };
 
 
 
-// Helper: given unicode and a font face, compute its size
+// Glyph bounds and pen advances use the same backend for measuring and drawing.
 static ROI
-text_size_from_unicode(cspan<uint32_t> utext, FT_Face face, int fontsize)
+text_size_from_unicode(cspan<uint32_t> utext, FontFace& face, int fontsize)
 {
-    int y = 0;
-    int x = 0;
+    int64_t x = 0, y = 0;
     ROI size;
     size.xbegin = size.ybegin = std::numeric_limits<int>::max();
     size.xend = size.yend = std::numeric_limits<int>::min();
-    FT_GlyphSlot slot     = face->glyph;
+    bool has_glyph        = false;
+    FontGlyph glyph;
     for (auto ch : utext) {
+        if (ch == '\r')
+            continue;
         if (ch == '\n') {
             x = 0;
             y += fontsize;
+            if (y > std::numeric_limits<int>::max())
+                return ROI();
             continue;
         }
-        int error = FT_Load_Char(face, ch, FT_LOAD_RENDER);
-        if (error)
-            continue;  // ignore errors
-        size.ybegin = std::min(size.ybegin, y - slot->bitmap_top);
-        size.yend   = std::max(size.yend, y + int(slot->bitmap.rows)
-                                              - int(slot->bitmap_top) + 1);
-        size.xbegin = std::min(size.xbegin, x + int(slot->bitmap_left));
-        size.xend   = std::max(size.xend, x + int(slot->bitmap.width)
-                                              + int(slot->bitmap_left) + 1);
-        // increment pen position
-        x += slot->advance.x >> 6;
+        if (!face.glyph(ch, glyph))
+            return ROI();
+        const int64_t left   = x + glyph.left;
+        const int64_t right  = left + glyph.width + 1;
+        const int64_t top    = y - glyph.top;
+        const int64_t bottom = top + glyph.height + 1;
+        if (left < std::numeric_limits<int>::min()
+            || right > std::numeric_limits<int>::max()
+            || top < std::numeric_limits<int>::min()
+            || bottom > std::numeric_limits<int>::max())
+            return ROI();
+        size.xbegin = std::min(size.xbegin, int(left));
+        size.xend   = std::max(size.xend, int(right));
+        size.ybegin = std::min(size.ybegin, int(top));
+        size.yend   = std::max(size.yend, int(bottom));
+        x += glyph.advance;
+        if (x < std::numeric_limits<int>::min()
+            || x > std::numeric_limits<int>::max())
+            return ROI();
+        has_glyph = true;
     }
-    return size;  // Font rendering not supported
+    if (has_glyph
+        && (int64_t(size.xend) - size.xbegin > std::numeric_limits<int>::max()
+            || int64_t(size.yend) - size.ybegin
+                   > std::numeric_limits<int>::max()))
+        return ROI();
+    return has_glyph ? size : ROI(0, 0, 0, 0, 0, 1, 0, 1);
 }
 
 
@@ -966,48 +985,20 @@ init_font_families()
     if (!s_font_families.empty())
         return;
 
-    // If we know FT is broken, don't bother trying again
-    if (ft_broken)
-        return;
-
-    // If FT not yet initialized, do it now.
-    if (!ft_library) {
-        if (FT_Init_FreeType(&ft_library)) {
-            ft_broken = true;
-            return;
-        }
-    }
-
     // read available fonts
     std::unordered_set<std::string> font_family_set;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         font_style_set;
     const std::vector<std::string>& font_files = pvt::font_file_list();
     for (const std::string& filename : font_files) {
-        // Load the font.
-        FT_Face face;
-        int error = FT_New_Face(ft_library, filename.c_str(),
-                                0 /* face index */, &face);
-        if (error)
+        FontFace face;
+        if (!face.load(filename) || face.family().empty())
             continue;
-
-        // Ignore if the font fmaily name is not defined.
-        if (!face->family_name) {
-            FT_Done_Face(face);
-            continue;
-        }
-
-        // Store the font family.
-        std::string family = std::string(face->family_name);
+        std::string family = face.family();
         font_family_set.insert(family);
-
-        // Store the font style.
-        std::string style = face->style_name ? std::string(face->style_name)
-                                             : std::string();
-        if (!style.empty()) {
-            std::unordered_set<std::string>& styles = font_style_set[family];
-            styles.insert(style);
-        }
+        std::string style = face.style();
+        if (!style.empty())
+            font_style_set[family].insert(style);
 
         // Store the filename. Use the family and style as the key (e.g. "Arial Italic").
         std::string font_name = family;
@@ -1018,8 +1009,6 @@ init_font_families()
         // Store regular fonts also with the family name only (e.g. "Arial Regular" as "Arial").
         if (style == "Regular")
             s_font_filename_per_family[family] = filename;
-
-        FT_Done_Face(face);
     }
 
     // Sort font families.
@@ -1046,19 +1035,6 @@ static bool
 resolve_font(string_view font_, std::string& result)
 {
     result.clear();
-
-    // If we know FT is broken, don't bother trying again
-    if (ft_broken)
-        return false;
-
-    // If FT not yet initialized, do it now.
-    if (!ft_library) {
-        if (FT_Init_FreeType(&ft_library)) {
-            ft_broken = true;
-            result    = "Could not initialize FreeType for font rendering";
-            return false;
-        }
-    }
 
     // Try to find the font.
     enumerate_fonts();
@@ -1126,9 +1102,9 @@ ImageBufAlgo::text_size(string_view text, int fontsize, string_view font_)
 {
     OIIO::pvt::LoggedTimer logtime("IBA::text_size");
     ROI size;
-#ifdef USE_FREETYPE
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
     // Thread safety
-    lock_guard ft_lock(ft_mutex);
+    lock_guard font_lock(font_mutex);
 
     std::string font;
     bool ok = resolve_font(font_, font);
@@ -1136,26 +1112,15 @@ ImageBufAlgo::text_size(string_view text, int fontsize, string_view font_)
         return size;
     }
 
-    int error = 0;
-    FT_Face face;  // handle to face object
-    error = FT_New_Face(ft_library, font.c_str(), 0 /* face index */, &face);
-    if (error) {
-        return size;  // couldn't open the face
-    }
-
-    error = FT_Set_Pixel_Sizes(face /*handle*/, 0 /*width*/,
-                               fontsize /*height*/);
-    if (error) {
-        FT_Done_Face(face);
-        return size;  // couldn't set the character size
-    }
+    FontFace face;
+    if (!face.load(font) || !face.set_size(fontsize))
+        return size;
 
     std::vector<uint32_t> utext;
     utext.reserve(text.size());
     Strutil::utf8_to_unicode(text, utext);
     size = text_size_from_unicode(utext, face, fontsize);
 
-    FT_Done_Face(face);
 #endif
 
     return size;  // Font rendering not supported
@@ -1176,9 +1141,9 @@ ImageBufAlgo::render_text(ImageBuf& R, int x, int y, string_view text,
         return false;
     }
 
-#ifdef USE_FREETYPE
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
     // Thread safety
-    lock_guard ft_lock(ft_mutex);
+    lock_guard font_lock(font_mutex);
 
     std::string font;
     bool ok = resolve_font(font_, font);
@@ -1188,23 +1153,12 @@ ImageBufAlgo::render_text(ImageBuf& R, int x, int y, string_view text,
         return false;
     }
 
-    int error = 0;
-    FT_Face face;  // handle to face object
-    error = FT_New_Face(ft_library, font.c_str(), 0 /* face index */, &face);
-    if (error) {
-        R.errorfmt("Could not set font face to \"{}\"", font);
-        return false;  // couldn't open the face
+    FontFace face;
+    if (!face.load(font) || !face.set_size(fontsize)) {
+        R.errorfmt("Could not use font \"{}\": {}", font, face.error());
+        return false;
     }
 
-    error = FT_Set_Pixel_Sizes(face /*handle*/, 0 /*width*/,
-                               fontsize /*height*/);
-    if (error) {
-        FT_Done_Face(face);
-        R.errorfmt("Could not set font size to {}", fontsize);
-        return false;  // couldn't set the character size
-    }
-
-    FT_GlyphSlot slot = face->glyph;  // a small shortcut
     int nchannels(R.nchannels());
     IBA_FIX_PERCHAN_LEN_DEF(textcolor, nchannels);
 
@@ -1227,62 +1181,85 @@ ImageBufAlgo::render_text(ImageBuf& R, int x, int y, string_view text,
     Strutil::utf8_to_unicode(text, utext);
 
     // Compute the size that the text will render as, into an ROI
-    ROI textroi     = text_size_from_unicode(utext, face, fontsize);
+    ROI textroi = text_size_from_unicode(utext, face, fontsize);
+    if (!textroi.defined()) {
+        R.errorfmt("Cannot measure text: {}",
+                   face.error().empty() ? "Text bounds are out of range"
+                                        : face.error());
+        return false;
+    }
+    if (!textroi.width() || !textroi.height())
+        return true;
     textroi.zbegin  = 0;
     textroi.zend    = 1;
     textroi.chbegin = 0;
     textroi.chend   = 1;
 
-    // Adjust position for alignment requests
+    // Alignment and shadow padding must fit the image's integer coordinates.
+    int64_t pen_x = x, pen_y = y;
     if (alignx == TextAlignX::Right)
-        x -= textroi.width();
+        pen_x -= textroi.width();
     if (alignx == TextAlignX::Center)
-        x -= (textroi.width() / 2 + textroi.xbegin);
+        pen_x -= int64_t(textroi.width() / 2) + textroi.xbegin;
     if (aligny == TextAlignY::Top)
-        y -= textroi.ybegin;
+        pen_y -= textroi.ybegin;
     if (aligny == TextAlignY::Bottom)
-        y -= textroi.yend;
+        pen_y -= textroi.yend;
     if (aligny == TextAlignY::Center)
-        y -= (textroi.height() / 2 + textroi.ybegin);
+        pen_y -= int64_t(textroi.height() / 2) + textroi.ybegin;
 
-    // Pad bounds for shadowing
-    textroi.xbegin += x - shadow;
-    textroi.xend += x + shadow;
-    textroi.ybegin += y - shadow;
-    textroi.yend += y + shadow;
+    const int64_t left   = textroi.xbegin + pen_x - shadow;
+    const int64_t right  = textroi.xend + pen_x + shadow;
+    const int64_t top    = textroi.ybegin + pen_y - shadow;
+    const int64_t bottom = textroi.yend + pen_y + shadow;
+    if (shadow < 0 || int64_t(shadow) * 2 + 1 > std::numeric_limits<int>::max()
+        || left < std::numeric_limits<int>::min()
+        || right > std::numeric_limits<int>::max()
+        || top < std::numeric_limits<int>::min()
+        || bottom > std::numeric_limits<int>::max()
+        || right - left > std::numeric_limits<int>::max()
+        || bottom - top > std::numeric_limits<int>::max()) {
+        R.errorfmt(
+            "Text position, dimensions, or shadow radius are out of range");
+        return false;
+    }
+    textroi.xbegin = int(left);
+    textroi.xend   = int(right);
+    textroi.ybegin = int(top);
+    textroi.yend   = int(bottom);
 
     // Create a temp buffer of the right size and render the text into it.
     ImageBuf textimg(ImageSpec(textroi, TypeDesc::FLOAT));
-    ImageBufAlgo::zero(textimg);
+    if (!ImageBufAlgo::zero(textimg)) {
+        R.errorfmt("Cannot initialize text bitmap: {}", textimg.geterror());
+        return false;
+    }
 
     // Glyph by glyph, fill in our textimg buffer
-    int origx = x;
+    const int64_t origx = pen_x;
+    FontGlyph glyph;
     for (auto ch : utext) {
-        // on Windows a newline is encoded as '\r\n'
-        // we simply ignore carriage return here
-        if (ch == '\r') {
+        if (ch == '\r')
             continue;
-        }
         if (ch == '\n') {
-            x = origx;
-            y += fontsize;
+            pen_x = origx;
+            pen_y += fontsize;
             continue;
         }
-        int error = FT_Load_Char(face, ch, FT_LOAD_RENDER);
-        if (error)
-            continue;  // ignore errors
-        // now, draw to our target surface
-        for (int j = 0; j < static_cast<int>(slot->bitmap.rows); ++j) {
-            int ry = y + j - slot->bitmap_top;
-            for (int i = 0; i < static_cast<int>(slot->bitmap.width); ++i) {
-                int rx  = x + i + slot->bitmap_left;
-                float b = slot->bitmap.buffer[slot->bitmap.pitch * j + i]
-                          / 255.0f;
-                textimg.setpixel(rx, ry, b);
+        if (!face.glyph(ch, glyph)) {
+            R.errorfmt("Cannot rasterize text: {}", face.error());
+            return false;
+        }
+        for (int j = 0; j < glyph.height; ++j) {
+            const int ry = int(pen_y + j - glyph.top);
+            for (int i = 0; i < glyph.width; ++i) {
+                const int rx         = int(pen_x + i + glyph.left);
+                const float coverage = glyph.pixels[size_t(j) * glyph.width + i]
+                                       / 255.0f;
+                textimg.setpixel(rx, ry, coverage);
             }
         }
-        // increment pen position
-        x += slot->advance.x >> 6;
+        pen_x += glyph.advance;
     }
 
     // Generate the alpha image -- if drop shadow is requested, dilate,
@@ -1313,11 +1290,10 @@ ImageBufAlgo::render_text(ImageBuf& R, int x, int y, string_view text,
         R.setpixel(r.x(), r.y(), pixelcolor);
     }
 
-    FT_Done_Face(face);
     return true;
 
 #else
-    R.errorfmt("OpenImageIO was not compiled with FreeType for font rendering");
+    R.errorfmt("OpenImageIO was not compiled with a font rendering backend");
     return false;  // Font rendering not supported
 #endif
 }
@@ -1330,8 +1306,8 @@ OIIO_NAMESPACE_BEGIN
 const std::vector<std::string>&
 pvt::font_family_list()
 {
-#ifdef USE_FREETYPE
-    lock_guard ft_lock(ft_mutex);
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
+    lock_guard font_lock(font_mutex);
     init_font_families();
 #endif
     return s_font_families;
@@ -1341,8 +1317,8 @@ pvt::font_family_list()
 const std::vector<std::string>
 pvt::font_style_list(string_view family)
 {
-#ifdef USE_FREETYPE
-    lock_guard ft_lock(ft_mutex);
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
+    lock_guard font_lock(font_mutex);
     init_font_families();
 #endif
     auto it = s_font_styles.find(family);
@@ -1359,8 +1335,8 @@ pvt::font_filename(string_view family, string_view style)
     if (family.empty())
         return std::string();
 
-#ifdef USE_FREETYPE
-    lock_guard ft_lock(ft_mutex);
+#if defined(USE_FREETYPE) || defined(USE_STRUETYPE)
+    lock_guard font_lock(font_mutex);
     init_font_families();
 #endif
 

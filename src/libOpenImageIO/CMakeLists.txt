@@ -43,6 +43,7 @@ set (libOpenImageIO_srcs
                           imagebufalgo_copy.cpp
                           imagebufalgo_deep.cpp
                           imagebufalgo_draw.cpp
+                          imagebufalgo_font.h
                           imagebufalgo_addsub.cpp
                           imagebufalgo_muldiv.cpp
                           imagebufalgo_mad.cpp
@@ -286,6 +287,12 @@ if (OIIO_BUILD_TESTS AND BUILD_TESTING)
     target_compile_definitions (imagebufalgo_test PRIVATE OIIO_USE_HWY=${_oiio_use_hwy})
     add_test (unit_imagebufalgo ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/imagebufalgo_test)
     set_tests_properties (unit_imagebufalgo PROPERTIES PROCESSORS 2 COST 60)
+
+    fancy_add_executable (NAME imagebufalgo_font_test SRC imagebufalgo_font_test.cpp
+                          LINK_LIBRARIES OpenImageIO
+                          FOLDER "Unit Tests" NO_INSTALL)
+    add_test (NAME unit_imagebufalgo_font COMMAND imagebufalgo_font_test
+              "${PROJECT_SOURCE_DIR}/src/fonts/Droid_Sans/DroidSans.ttf")
 
     fancy_add_executable (NAME imagespec_test SRC imagespec_test.cpp
                           LINK_LIBRARIES OpenImageIO
